@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pulsar.Compiler", "Pulsar.Compiler\Pulsar.Compiler.csproj", "{2BADB51B-61BD-4303-9A71-4B7097E6594F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pulsar.Runtime", "Pulsar.Runtime\Pulsar.Runtime.csproj", "{F6AE7A45-6E2D-44C8-8FDF-82CD6F5B7C5B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pulsar.Tests", "Pulsar.Tests\Pulsar.Tests.csproj", "{B4F7F82C-7547-4EB8-A30A-17FF40F70DAA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{2BADB51B-61BD-4303-9A71-4B7097E6594F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2BADB51B-61BD-4303-9A71-4B7097E6594F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2BADB51B-61BD-4303-9A71-4B7097E6594F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2BADB51B-61BD-4303-9A71-4B7097E6594F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F6AE7A45-6E2D-44C8-8FDF-82CD6F5B7C5B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F6AE7A45-6E2D-44C8-8FDF-82CD6F5B7C5B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F6AE7A45-6E2D-44C8-8FDF-82CD6F5B7C5B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F6AE7A45-6E2D-44C8-8FDF-82CD6F5B7C5B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B4F7F82C-7547-4EB8-A30A-17FF40F70DAA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B4F7F82C-7547-4EB8-A30A-17FF40F70DAA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B4F7F82C-7547-4EB8-A30A-17FF40F70DAA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B4F7F82C-7547-4EB8-A30A-17FF40F70DAA}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
