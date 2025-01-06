@@ -1,0 +1,73 @@
+## .NET Core
+*.swp
+*.*~
+project.lock.json
+.DS_Store
+*.pyc
+nupkg/
+
+## Visual Studio Code
+.vscode/
+
+## Visual Studio
+.vs/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+## Rider
+.idea/
+*.sln.iml
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/**/usage.statistics.xml
+.idea/**/dictionaries
+.idea/**/shelf
+.idea/**/contentModel.xml
+.idea/**/dataSources/
+.idea/**/dataSources.ids
+.idea/**/dataSources.local.xml
+.idea/**/sqlDataSources.xml
+.idea/**/dynamic.xml
+.idea/**/uiDesigner.xml
+.idea/**/dbnavigator.xml
+.idea/**/*.iml
+.idea/modules.xml
+
+## Build results - using more explicit patterns
+[Bb]in/
+[Oo]bj/
+**/[Bb]in/
+**/[Oo]bj/
+**/[Dd]ebug/
+**/[Rr]elease/
+**/x64/
+**/x86/
+**/build/
+**/bld/
+**/[Oo]ut/
+
+# Build logs
+*.log
+*.binlog
+msbuild.*
+
+## Visual Studio profiler
+*.psess
+*.vsp
+*.vspx
+*.sap
+
+## NuGet Packages
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+
+# Uncomment if packages folder should be checked in
+#!**/[Pp]ackages/repositories.config
+Pulsar.Compiler/obj/project.assets.json
+Pulsar.Compiler/obj/project.assets.json
+Pulsar.Compiler/obj/project.assets.json
