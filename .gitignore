@@ -7,7 +7,7 @@ project.lock.json
 nupkg/
 
 ## Visual Studio Code
-.vscode
+.vscode/
 
 ## Visual Studio
 .vs/
@@ -36,21 +36,23 @@ nupkg/
 .idea/**/*.iml
 .idea/modules.xml
 
-## Build results
-[Dd]ebug/
-[Dd]ebugPublic/
-[Rr]elease/
-[Rr]eleases/
-x64/
-x86/
-build/
-bld/
+## Build results - using more explicit patterns
 [Bb]in/
 [Oo]bj/
-[Oo]ut/
-msbuild.log
-msbuild.err
-msbuild.wrn
+**/[Bb]in/
+**/[Oo]bj/
+**/[Dd]ebug/
+**/[Rr]elease/
+**/x64/
+**/x86/
+**/build/
+**/bld/
+**/[Oo]ut/
+
+# Build logs
+*.log
+*.binlog
+msbuild.*
 
 ## Visual Studio profiler
 *.psess
@@ -61,7 +63,11 @@ msbuild.wrn
 ## NuGet Packages
 *.nupkg
 *.snupkg
-# The packages folder can be ignored because of Package Restore
 **/[Pp]ackages/*
-# except build/, which is used as an MSBuild target.
 !**/[Pp]ackages/build/
+
+# Uncomment if packages folder should be checked in
+#!**/[Pp]ackages/repositories.config
+Pulsar.Compiler/obj/project.assets.json
+Pulsar.Compiler/obj/project.assets.json
+Pulsar.Compiler/obj/project.assets.json

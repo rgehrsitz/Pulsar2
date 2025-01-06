@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Pulsar.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8723ab7f0d9dc68517e660730dde54baa1220541")]
 [assembly: System.Reflection.AssemblyProductAttribute("Pulsar.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Pulsar.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
