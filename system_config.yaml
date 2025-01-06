@@ -1,9 +1,0 @@
-version: 1
-valid_sensors:
-  - temperature_f
-  - temperature_c
-  - humidity
-  - pressure
-  - alerts
-  - alert_channel
-  - converted_temp
