@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using Pulsar.Compiler.Models;
@@ -17,13 +18,22 @@ namespace Pulsar.Compiler.Parsers
         public DslParser()
         {
             _deserializer = new DeserializerBuilder()
-                .WithNamingConvention(CamelCaseNamingConvention.Instance)
+                .WithNamingConvention(UnderscoredNamingConvention.Instance) // Change this
+                .IgnoreUnmatchedProperties()
                 .Build();
         }
 
         public List<RuleDefinition> ParseRules(string yamlContent, List<string> validSensors)
         {
             var root = _deserializer.Deserialize<RuleRoot>(yamlContent);
+            Debug.WriteLine($"Deserialized root: Rules count = {root.Rules.Count}");
+            if (root.Rules.Any())
+            {
+                var firstRule = root.Rules.First();
+                Debug.WriteLine(
+                    $"First rule: Name = {firstRule.Name}, Actions count = {firstRule.Actions?.Count ?? 0}"
+                );
+            }
 
             var ruleDefinitions = new List<RuleDefinition>();
 
@@ -50,23 +60,87 @@ namespace Pulsar.Compiler.Parsers
         {
             var allSensors = new List<string>();
 
+            Debug.WriteLine($"\nValidating rule: {rule.Name}");
+            Debug.WriteLine($"Valid sensors list: {string.Join(", ", validSensors)}");
+
             // Collect sensors from conditions
             if (rule.Conditions?.All != null)
-                allSensors.AddRange(GetSensorsFromConditions(rule.Conditions.All));
+            {
+                foreach (var condition in rule.Conditions.All)
+                {
+                    Debug.WriteLine(
+                        $"Processing All condition: Type = {condition.ConditionDetails.Type}"
+                    );
+                    if (
+                        condition.ConditionDetails.Type == "threshold_over_time"
+                        || condition.ConditionDetails.Type == "comparison"
+                    )
+                    {
+                        Debug.WriteLine($"Adding sensor: {condition.ConditionDetails.Sensor}");
+                        allSensors.Add(condition.ConditionDetails.Sensor);
+                    }
+                    else if (condition.ConditionDetails.Type == "expression")
+                    {
+                        Debug.WriteLine(
+                            $"Expression condition: {condition.ConditionDetails.Expression}"
+                        );
+                        // We might need to parse the expression to extract sensors
+                    }
+                }
+            }
 
             if (rule.Conditions?.Any != null)
-                allSensors.AddRange(GetSensorsFromConditions(rule.Conditions.Any));
+            {
+                foreach (var condition in rule.Conditions.Any)
+                {
+                    Debug.WriteLine(
+                        $"Processing Any condition: Type = {condition.ConditionDetails.Type}"
+                    );
+                    if (
+                        condition.ConditionDetails.Type == "threshold_over_time"
+                        || condition.ConditionDetails.Type == "comparison"
+                    )
+                    {
+                        Debug.WriteLine($"Adding sensor: {condition.ConditionDetails.Sensor}");
+                        allSensors.Add(condition.ConditionDetails.Sensor);
+                    }
+                    else if (condition.ConditionDetails.Type == "expression")
+                    {
+                        Debug.WriteLine(
+                            $"Expression condition: {condition.ConditionDetails.Expression}"
+                        );
+                        // We might need to parse the expression to extract sensors
+                    }
+                }
+            }
 
             // Collect sensors from actions
             if (rule.Actions != null)
-                allSensors.AddRange(
-                    rule.Actions.Where(a => a.SetValue != null).Select(a => a.SetValue.Key)
-                );
+            {
+                foreach (var actionItem in rule.Actions)
+                {
+                    Debug.WriteLine("Processing action:");
+                    if (actionItem.SetValue != null)
+                    {
+                        Debug.WriteLine($"Adding SetValue key: {actionItem.SetValue.Key}");
+                        allSensors.Add(actionItem.SetValue.Key);
+                    }
+                    if (actionItem.SendMessage != null)
+                    {
+                        Debug.WriteLine($"SendMessage channel: {actionItem.SendMessage.Channel}");
+                        // Do we need to validate the channel?
+                    }
+                }
+            }
+
+            Debug.WriteLine($"All collected sensors: {string.Join(", ", allSensors)}");
 
             // Validate sensors against the valid list
             var invalidSensors = allSensors
                 .Where(sensor => !validSensors.Contains(sensor))
                 .ToList();
+
+            Debug.WriteLine($"Invalid sensors found: {string.Join(", ", invalidSensors)}");
 
             if (invalidSensors.Any())
                 throw new InvalidOperationException(
@@ -102,19 +176,32 @@ namespace Pulsar.Compiler.Parsers
 
         private ConditionDefinition ConvertCondition(Condition condition)
         {
-            if (condition.ConditionDetails.Type == "comparison")
+            switch (condition.ConditionDetails.Type)
             {
-                return new ComparisonCondition
-                {
-                    Sensor = condition.ConditionDetails.Sensor,
-                    Operator = ParseOperator(condition.ConditionDetails.Operator),
-                    Value = condition.ConditionDetails.Value,
-                };
+                case "comparison":
+                    return new ComparisonCondition
+                    {
+                        Sensor = condition.ConditionDetails.Sensor,
+                        Operator = ParseOperator(condition.ConditionDetails.Operator),
+                        Value = condition.ConditionDetails.Value,
+                    };
+                case "expression":
+                    return new ExpressionCondition
+                    {
+                        Expression = condition.ConditionDetails.Expression,
+                    };
+                case "threshold_over_time":
+                    return new ThresholdOverTimeCondition
+                    {
+                        Sensor = condition.ConditionDetails.Sensor,
+                        Threshold = condition.ConditionDetails.Value,
+                        Duration = condition.ConditionDetails.Duration,
+                    };
+                default:
+                    throw new NotImplementedException(
+                        $"Unsupported condition type: {condition.ConditionDetails.Type}"
+                    );
             }
-
-            throw new NotImplementedException(
-                $"Unsupported condition type: {condition.ConditionDetails.Type}"
-            );
         }
 
         private ComparisonOperator ParseOperator(string op)
@@ -131,22 +218,55 @@ namespace Pulsar.Compiler.Parsers
             };
         }
 
-        private List<ActionDefinition> ConvertActions(List<ActionYaml> actions)
+        private List<ActionDefinition> ConvertActions(List<ActionListItem> actions)
         {
-            return actions
-                .Select(action =>
+            Debug.WriteLine("=== Starting ConvertActions ===");
+            Debug.WriteLine($"Number of actions: {actions.Count}");
+            foreach (var actionItem in actions)
+            {
+                Debug.WriteLine($"Action item details:");
+                Debug.WriteLine($"  Item is null?: {actionItem == null}");
+                Debug.WriteLine($"  SetValue is null?: {actionItem?.SetValue == null}");
+                Debug.WriteLine($"  SendMessage is null?: {actionItem?.SendMessage == null}");
+
+                if (actionItem?.SetValue != null)
                 {
-                    if (action.SetValue != null)
+                    Debug.WriteLine($"  SetValue.Key: {actionItem.SetValue.Key}");
+                    Debug.WriteLine(
+                        $"  SetValue.ValueExpression: {actionItem.SetValue.ValueExpression}"
+                    );
+                }
+            }
+
+            return actions
+                .Select(actionItem =>
+                {
+                    Debug.WriteLine($"Processing action item");
+
+                    if (actionItem.SetValue != null)
                     {
-                        return (ActionDefinition)
-                            new SetValueAction
+                        Debug.WriteLine($"Found SetValue action");
+                        return new SetValueAction
                             {
-                                Key = action.SetValue.Key,
-                                ValueExpression = action.SetValue.ValueExpression,
-                            };
+                                Key = actionItem.SetValue.Key,
+                                ValueExpression = actionItem.SetValue.ValueExpression,
+                            } as ActionDefinition;
                     }
 
-                    throw new NotImplementedException("Unsupported action type");
+                    if (actionItem.SendMessage != null)
+                    {
+                        Debug.WriteLine($"Found SendMessage action");
+                        return new SendMessageAction
+                            {
+                                Channel = actionItem.SendMessage.Channel,
+                                Message = actionItem.SendMessage.Message,
+                            } as ActionDefinition;
+                    }
+
+                    Debug.WriteLine($"No valid action type found");
+                    throw new InvalidOperationException(
+                        $"Unknown action type. Action item details: SetValue is {(actionItem.SetValue != null ? "present" : "null")}, SendMessage is {(actionItem.SendMessage != null ? "present" : "null")}"
+                    );
                 })
                 .ToList();
         }
@@ -162,7 +282,16 @@ namespace Pulsar.Compiler.Parsers
     {
         public string Name { get; set; } = string.Empty;
         public ConditionGroupYaml Conditions { get; set; } = new();
-        public List<ActionYaml> Actions { get; set; } = new();
+        public List<ActionListItem> Actions { get; set; } = new();
+    }
+
+    public class ActionListItem
+    {
+        [YamlMember(Alias = "set_value")]
+        public SetValueActionYaml? SetValue { get; set; }
+
+        [YamlMember(Alias = "send_message")]
+        public SendMessageActionYaml? SendMessage { get; set; }
     }
 
     public class ConditionGroupYaml
@@ -173,6 +302,7 @@ namespace Pulsar.Compiler.Parsers
 
     public class Condition
     {
+        [YamlMember(Alias = "condition")]
         public ConditionInner ConditionDetails { get; set; } = new();
     }
 
@@ -182,16 +312,31 @@ namespace Pulsar.Compiler.Parsers
         public string Sensor { get; set; } = string.Empty;
         public string Operator { get; set; } = string.Empty;
         public double Value { get; set; }
+        public string Expression { get; set; } = string.Empty;
+        public int Duration { get; set; }
     }
 
     public class ActionYaml
     {
-        public SetValueActionYaml SetValue { get; set; } = new();
+        [YamlMember(Alias = "set_value")]
+        public SetValueActionYaml? SetValue { get; set; }
+
+        [YamlMember(Alias = "send_message")]
+        public SendMessageActionYaml? SendMessage { get; set; }
     }
 
     public class SetValueActionYaml
     {
         public string Key { get; set; } = string.Empty;
         public string ValueExpression { get; set; } = string.Empty;
+    }
+
+    public class SendMessageActionYaml
+    {
+        [YamlMember(Alias = "channel")]
+        public string Channel { get; set; } = string.Empty;
+
+        [YamlMember(Alias = "message")]
+        public string Message { get; set; } = string.Empty;
     }
 }

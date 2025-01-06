@@ -19,6 +19,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="TestData\rules.yaml">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+</ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Pulsar.Compiler\Pulsar.Compiler.csproj" />
     <ProjectReference Include="..\Pulsar.Runtime\Pulsar.Runtime.csproj" />
   </ItemGroup>
