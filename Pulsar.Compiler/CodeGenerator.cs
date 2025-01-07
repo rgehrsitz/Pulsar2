@@ -31,24 +31,72 @@ namespace Pulsar.Compiler.Generation
                 {
                     codeBuilder.AppendLine($"        // Rule: {rule.Name}");
 
-                    if (rule.Conditions?.All != null)
+                    // Handle "All" conditions
+                    string? allConditions = null;
+                    if (rule.Conditions?.All != null && rule.Conditions.All.Any())
                     {
-                        foreach (var condition in rule.Conditions.All.OfType<ComparisonCondition>())
+                        var conditions = rule.Conditions.All.Select(FormatCondition)
+                                           .Where(c => !string.IsNullOrEmpty(c));
+                        if (conditions.Any())
                         {
-                            codeBuilder.AppendLine(
-                                $"        if (inputs[\"{condition.Sensor}\"] {GetOperator(condition.Operator)} {condition.Value})"
-                            );
-                            codeBuilder.AppendLine("        {");
+                            allConditions = string.Join(" && ", conditions);
+                        }
+                    }
 
-                            foreach (var action in rule.Actions.OfType<SetValueAction>())
+                    // Handle "Any" conditions
+                    string? anyConditions = null;
+                    if (rule.Conditions?.Any != null && rule.Conditions.Any.Any())
+                    {
+                        var conditions = rule.Conditions.Any.Select(FormatCondition)
+                                           .Where(c => !string.IsNullOrEmpty(c));
+                        if (conditions.Any())
+                        {
+                            anyConditions = string.Join(" || ", conditions);
+                        }
+                    }
+
+                    // Combine conditions
+                    string? finalCondition = null;
+                    if (allConditions != null && anyConditions != null)
+                    {
+                        finalCondition = $"({allConditions}) && ({anyConditions})";
+                    }
+                    else if (allConditions != null)
+                    {
+                        finalCondition = allConditions;
+                    }
+                    else if (anyConditions != null)
+                    {
+                        finalCondition = anyConditions;
+                    }
+
+                    if (finalCondition != null)
+                    {
+                        codeBuilder.AppendLine($"        if ({finalCondition})");
+                        codeBuilder.AppendLine("        {");
+
+                        foreach (var action in rule.Actions.OfType<SetValueAction>())
+                        {
+                            string valueAssignment;
+                            if (action.Value.HasValue)
                             {
-                                codeBuilder.AppendLine(
-                                    $"            outputs[\"{action.Key}\"] = {action.ValueExpression};"
-                                );
+                                valueAssignment = action.Value.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                            }
+                            else if (!string.IsNullOrEmpty(action.ValueExpression))
+                            {
+                                valueAssignment = action.ValueExpression;
+                            }
+                            else
+                            {
+                                valueAssignment = "0";
                             }
 
-                            codeBuilder.AppendLine("        }");
+                            codeBuilder.AppendLine(
+                                $"            outputs[\"{action.Key}\"] = {valueAssignment};"
+                            );
                         }
+
+                        codeBuilder.AppendLine("        }");
                     }
                 }
 
@@ -58,6 +106,20 @@ namespace Pulsar.Compiler.Generation
 
             codeBuilder.AppendLine("}");
             return codeBuilder.ToString();
+        }
+
+        private static string FormatCondition(ConditionDefinition condition)
+        {
+            return condition switch
+            {
+                ComparisonCondition comp =>
+                    $"inputs[\"{comp.Sensor}\"] {GetOperator(comp.Operator)} {comp.Value}",
+
+                ExpressionCondition expr =>
+                    expr.Expression,
+
+                _ => string.Empty
+            };
         }
 
         private static string GetOperator(ComparisonOperator op)
