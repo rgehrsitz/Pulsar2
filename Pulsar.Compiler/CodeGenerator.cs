@@ -1,9 +1,8 @@
-// File: Pulsar.Compiler/CodeGenerator.cs
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Diagnostics;
 using Pulsar.Compiler.Models;
 
 namespace Pulsar.Compiler.Generation
@@ -12,114 +11,168 @@ namespace Pulsar.Compiler.Generation
     {
         public static string GenerateCSharp(List<RuleDefinition> sortedRules)
         {
+            ArgumentNullException.ThrowIfNull(sortedRules, nameof(sortedRules));
+
             var codeBuilder = new StringBuilder();
             codeBuilder.AppendLine("using System;");
             codeBuilder.AppendLine("using System.Collections.Generic;");
             codeBuilder.AppendLine();
             codeBuilder.AppendLine("public class CompiledRules");
             codeBuilder.AppendLine("{");
+            codeBuilder.AppendLine("    public void EvaluateRules(Dictionary<string, double> inputs, Dictionary<string, double> outputs)");
+            codeBuilder.AppendLine("    {");
 
-            int layer = 0;
-            foreach (var group in sortedRules.GroupBy(r => r))
+            foreach (var rule in sortedRules)
             {
-                codeBuilder.AppendLine(
-                    $"    public void EvaluateLayer{layer}(Dictionary<string, double> inputs, Dictionary<string, double> outputs)"
-                );
-                codeBuilder.AppendLine("    {");
+                Debug.WriteLine($"\nProcessing rule: {rule.Name}");
+                codeBuilder.AppendLine($"        // Rule: {rule.Name}");
 
-                foreach (var rule in group)
+                string? condition = GenerateCondition(rule.Conditions);
+                Debug.WriteLine($"Generated condition before processing: {condition}");
+
+                if (!string.IsNullOrEmpty(condition))
                 {
-                    codeBuilder.AppendLine($"        // Rule: {rule.Name}");
-
-                    // Handle "All" conditions
-                    string? allConditions = null;
-                    if (rule.Conditions?.All != null && rule.Conditions.All.Any())
+                    // Remove outer parentheses if they exist
+                    if (condition.StartsWith("(") && condition.EndsWith(")"))
                     {
-                        var conditions = rule.Conditions.All.Select(FormatCondition)
-                                           .Where(c => !string.IsNullOrEmpty(c));
-                        if (conditions.Any())
+                        condition = condition[1..^1];
+                        Debug.WriteLine($"Condition after parentheses removal: {condition}");
+                    }
+
+                    codeBuilder.AppendLine($"        if ({condition})");
+                    Debug.WriteLine($"Added if statement: if ({condition})");
+                    codeBuilder.AppendLine("        {");
+                    GenerateActions(codeBuilder, rule.Actions);
+                    codeBuilder.AppendLine("        }");
+                }
+            }
+
+            codeBuilder.AppendLine("    }");
+            codeBuilder.AppendLine("}");
+
+            var finalCode = codeBuilder.ToString();
+            Debug.WriteLine("\n==== COMPLETE GENERATED CODE START ====");
+            Debug.WriteLine(finalCode);
+            Debug.WriteLine("==== COMPLETE GENERATED CODE END ====");
+
+            return finalCode;
+        }
+
+        private static string? GenerateCondition(ConditionGroup? conditions)
+        {
+            if (conditions == null) return null;
+
+            Debug.WriteLine("Processing ConditionGroup:");
+            Debug.WriteLine($"  All conditions count: {conditions.All?.Count ?? 0}");
+            Debug.WriteLine($"  Any conditions count: {conditions.Any?.Count ?? 0}");
+
+            var result = "";
+
+            // Handle All conditions
+            if (conditions.All?.Any() == true)
+            {
+                var allConditions = new List<string>();
+                foreach (var condition in conditions.All)
+                {
+                    Debug.WriteLine($"Processing All condition of type: {condition.GetType().Name}");
+                    string? conditionStr = null;
+
+                    if (condition is ComparisonCondition comp)
+                    {
+                        conditionStr = $"inputs[\"{comp.Sensor}\"] {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                    }
+                    else if (condition is ExpressionCondition expr)
+                    {
+                        conditionStr = $"({expr.Expression})";
+                    }
+                    else if (condition is ConditionGroup group)
+                    {
+                        var nestedCondition = GenerateCondition(group);
+                        if (!string.IsNullOrEmpty(nestedCondition))
                         {
-                            allConditions = string.Join(" && ", conditions);
+                            conditionStr = nestedCondition;
                         }
                     }
 
-                    // Handle "Any" conditions
-                    string? anyConditions = null;
-                    if (rule.Conditions?.Any != null && rule.Conditions.Any.Any())
+                    if (!string.IsNullOrEmpty(conditionStr))
                     {
-                        var conditions = rule.Conditions.Any.Select(FormatCondition)
-                                           .Where(c => !string.IsNullOrEmpty(c));
-                        if (conditions.Any())
-                        {
-                            anyConditions = string.Join(" || ", conditions);
-                        }
-                    }
-
-                    // Combine conditions
-                    string? finalCondition = null;
-                    if (allConditions != null && anyConditions != null)
-                    {
-                        finalCondition = $"({allConditions}) && ({anyConditions})";
-                    }
-                    else if (allConditions != null)
-                    {
-                        finalCondition = allConditions;
-                    }
-                    else if (anyConditions != null)
-                    {
-                        finalCondition = anyConditions;
-                    }
-
-                    if (finalCondition != null)
-                    {
-                        codeBuilder.AppendLine($"        if ({finalCondition})");
-                        codeBuilder.AppendLine("        {");
-
-                        foreach (var action in rule.Actions.OfType<SetValueAction>())
-                        {
-                            string valueAssignment;
-                            if (action.Value.HasValue)
-                            {
-                                valueAssignment = action.Value.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                            }
-                            else if (!string.IsNullOrEmpty(action.ValueExpression))
-                            {
-                                valueAssignment = action.ValueExpression;
-                            }
-                            else
-                            {
-                                valueAssignment = "0";
-                            }
-
-                            codeBuilder.AppendLine(
-                                $"            outputs[\"{action.Key}\"] = {valueAssignment};"
-                            );
-                        }
-
-                        codeBuilder.AppendLine("        }");
+                        Debug.WriteLine($"Adding ALL condition: {conditionStr}");
+                        allConditions.Add(conditionStr);
                     }
                 }
 
-                codeBuilder.AppendLine("    }");
-                layer++;
+                if (allConditions.Any())
+                {
+                    result = $"({string.Join(" && ", allConditions)})";
+                }
             }
 
-            codeBuilder.AppendLine("}");
-            return codeBuilder.ToString();
+            // Handle Any conditions
+            if (conditions.Any?.Any() == true)
+            {
+                var anyConditions = new List<string>();
+                foreach (var condition in conditions.Any)
+                {
+                    Debug.WriteLine($"Processing Any condition of type: {condition.GetType().Name}");
+                    string? conditionStr = null;
+
+                    if (condition is ComparisonCondition comp)
+                    {
+                        conditionStr = $"inputs[\"{comp.Sensor}\"] {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                    }
+                    else if (condition is ExpressionCondition expr)
+                    {
+                        conditionStr = $"({expr.Expression})";
+                    }
+                    else if (condition is ConditionGroup group)
+                    {
+                        var nestedCondition = GenerateCondition(group);
+                        if (!string.IsNullOrEmpty(nestedCondition))
+                        {
+                            conditionStr = nestedCondition;
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(conditionStr))
+                    {
+                        Debug.WriteLine($"Adding ANY condition: {conditionStr}");
+                        anyConditions.Add(conditionStr);
+                    }
+                }
+
+                if (anyConditions.Any())
+                {
+                    var anyPart = string.Join(" || ", anyConditions);
+                    result = result.Length > 0
+                        ? $"{result} && {anyPart}"
+                        : $"({anyPart})";
+                }
+            }
+
+            Debug.WriteLine($"Final condition group result: {result}");
+            return result.Length > 0 ? result : null;
         }
 
-        private static string FormatCondition(ConditionDefinition condition)
+        private static void GenerateActions(StringBuilder builder, List<ActionDefinition> actions)
         {
-            return condition switch
+            foreach (var action in actions.OfType<SetValueAction>())
             {
-                ComparisonCondition comp =>
-                    $"inputs[\"{comp.Sensor}\"] {GetOperator(comp.Operator)} {comp.Value}",
+                string valueAssignment;
+                if (action.Value.HasValue)
+                {
+                    valueAssignment = action.Value.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+                else if (!string.IsNullOrEmpty(action.ValueExpression))
+                {
+                    valueAssignment = action.ValueExpression;
+                }
+                else
+                {
+                    valueAssignment = "0";
+                }
 
-                ExpressionCondition expr =>
-                    expr.Expression,
-
-                _ => string.Empty
-            };
+                builder.AppendLine($"            outputs[\"{action.Key}\"] = {valueAssignment};");
+            }
         }
 
         private static string GetOperator(ComparisonOperator op)
@@ -132,7 +185,7 @@ namespace Pulsar.Compiler.Generation
                 ComparisonOperator.GreaterThanOrEqual => ">=",
                 ComparisonOperator.EqualTo => "==",
                 ComparisonOperator.NotEqualTo => "!=",
-                _ => throw new InvalidOperationException("Unsupported operator"),
+                _ => throw new InvalidOperationException($"Unsupported operator: {op}"),
             };
         }
     }

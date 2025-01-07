@@ -7,14 +7,15 @@ namespace Pulsar.Compiler.Models
 {
     public class RuleDefinition
     {
-        public string Name { get; set; } = string.Empty; // Default value to avoid null
-        public string? Description { get; set; } // Nullable since it's optional
-        public ConditionGroup Conditions { get; set; } = new ConditionGroup();
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public ConditionGroup? Conditions { get; set; }
         public List<ActionDefinition> Actions { get; set; } = new List<ActionDefinition>();
     }
 
-    public class ConditionGroup
+    public class ConditionGroup : ConditionDefinition
     {
+        public new ConditionType Type { get; set; } = ConditionType.Group;
         public List<ConditionDefinition> All { get; set; } = new List<ConditionDefinition>();
         public List<ConditionDefinition> Any { get; set; } = new List<ConditionDefinition>();
     }
@@ -29,11 +30,12 @@ namespace Pulsar.Compiler.Models
         Comparison,
         Expression,
         ThresholdOverTime,
+        Group
     }
 
     public class ComparisonCondition : ConditionDefinition
     {
-        public new ConditionType Type { get; set; } = ConditionType.Comparison; // Hides the base Type
+        public new ConditionType Type { get; set; } = ConditionType.Comparison;
         public string Sensor { get; set; } = string.Empty;
         public ComparisonOperator Operator { get; set; }
         public double Value { get; set; }
@@ -51,13 +53,13 @@ namespace Pulsar.Compiler.Models
 
     public class ExpressionCondition : ConditionDefinition
     {
-        public new ConditionType Type { get; set; } = ConditionType.Expression; // Hides the base Type
+        public new ConditionType Type { get; set; } = ConditionType.Expression;
         public string Expression { get; set; } = string.Empty;
     }
 
     public class ThresholdOverTimeCondition : ConditionDefinition
     {
-        public new ConditionType Type { get; set; } = ConditionType.ThresholdOverTime; // Hides the base Type
+        public new ConditionType Type { get; set; } = ConditionType.ThresholdOverTime;
         public string Sensor { get; set; } = string.Empty;
         public double Threshold { get; set; }
         public int Duration { get; set; }
@@ -76,15 +78,15 @@ namespace Pulsar.Compiler.Models
 
     public class SetValueAction : ActionDefinition
     {
-        public new ActionType Type { get; set; } = ActionType.SetValue; // Hides the base Type
+        public new ActionType Type { get; set; } = ActionType.SetValue;
         public string Key { get; set; } = string.Empty;
-        public double? Value { get; set; } // Nullable
-        public string? ValueExpression { get; set; } // Nullable
+        public double? Value { get; set; }
+        public string? ValueExpression { get; set; }
     }
 
     public class SendMessageAction : ActionDefinition
     {
-        public new ActionType Type { get; set; } = ActionType.SendMessage; // Hides the base Type
+        public new ActionType Type { get; set; } = ActionType.SendMessage;
         public string Channel { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
     }
