@@ -26,13 +26,12 @@ namespace Pulsar.Compiler.Analysis
         )
         {
             var graph = new Dictionary<RuleDefinition, List<RuleDefinition>>();
-            var outputs = new Dictionary<string, RuleDefinition>();
+            _outputs.Clear(); // Clear previous outputs
 
             // Initialize empty lists for all rules
             foreach (var rule in rules)
             {
                 graph[rule] = new List<RuleDefinition>();
-                Debug.WriteLine($"Initialized graph entry for {rule.Name}");
             }
 
             // Collect outputs from each rule
@@ -42,23 +41,19 @@ namespace Pulsar.Compiler.Analysis
                 {
                     if (action is SetValueAction setValueAction)
                     {
-                        outputs[setValueAction.Key] = rule;
-                        Debug.WriteLine($"Recorded output {setValueAction.Key} for {rule.Name}");
+                        _outputs[setValueAction.Key] = rule;
                     }
                 }
             }
 
-            // Build dependencies - create edges FROM dependencies TO dependents
+            // Build dependencies
             foreach (var rule in rules)
             {
                 var dependencies = GetDependencies(rule);
-                Debug.WriteLine($"\nProcessing dependencies for {rule.Name}:");
-
                 foreach (var dependency in dependencies)
                 {
-                    if (outputs.TryGetValue(dependency, out var dependencyRule))
+                    if (_outputs.TryGetValue(dependency, out var dependencyRule))
                     {
-                        // Add edge FROM dependency TO the current rule
                         graph[dependencyRule].Add(rule);
                         Debug.WriteLine($"Added edge from {dependencyRule.Name} to {rule.Name}");
                     }
@@ -136,6 +131,8 @@ namespace Pulsar.Compiler.Analysis
             return sorted;
         }
 
+        private Dictionary<string, RuleDefinition> _outputs = new();
+
         private void Visit(
             RuleDefinition rule,
             Dictionary<RuleDefinition, List<RuleDefinition>> graph,
@@ -157,47 +154,35 @@ namespace Pulsar.Compiler.Analysis
             {
                 visiting.Add(rule);
 
-                // Check if all dependencies are satisfied
-                var dependenciesSatisfied = true;
-                foreach (var dep in GetDependencies(rule))
-                {
-                    if (outputs.TryGetValue(dep, out var depRule) && !sorted.Contains(depRule))
-                    {
-                        dependenciesSatisfied = false;
-                        break;
-                    }
-                }
-
-                if (dependenciesSatisfied)
-                {
-                    // If all dependencies are in sorted list, add this rule
-                    sorted.Add(rule);
-                    Debug.WriteLine(
-                        $"Added {rule.Name} to sorted list (all dependencies satisfied)"
-                    );
-                }
-
-                // Visit all dependents
+                // Visit all dependents first
                 foreach (var dependent in graph[rule])
                 {
-                    Debug.WriteLine($"Processing dependent {dependent.Name} of {rule.Name}");
                     if (!visited.Contains(dependent))
                     {
                         Visit(dependent, graph, visited, visiting, sorted);
                     }
                 }
 
-                // If we couldn't add it before because of dependencies, add it now
-                if (!dependenciesSatisfied && !sorted.Contains(rule))
-                {
-                    sorted.Add(rule);
-                    Debug.WriteLine(
-                        $"Added {rule.Name} to sorted list (after processing dependents)"
-                    );
-                }
-
                 visiting.Remove(rule);
                 visited.Add(rule);
+
+                if (!sorted.Contains(rule))
+                {
+                    // If this rule has dependents, insert at beginning
+                    // Otherwise append to maintain original order
+                    if (graph[rule].Any())
+                    {
+                        sorted.Insert(0, rule);
+                        Debug.WriteLine(
+                            $"Added {rule.Name} to start of sorted list (has dependents)"
+                        );
+                    }
+                    else
+                    {
+                        sorted.Add(rule);
+                        Debug.WriteLine($"Added {rule.Name} to end of sorted list (no dependents)");
+                    }
+                }
             }
         }
     }
