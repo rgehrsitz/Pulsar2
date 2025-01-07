@@ -1,0 +1,27 @@
+sequenceDiagram
+    participant Timer
+    participant Runtime
+    participant Redis
+    participant RingBuffer
+    participant Rules
+    
+    Note over Timer,Rules: 100ms Cycle
+    Timer->>Runtime: Trigger Cycle
+    activate Runtime
+    
+    Runtime->>Redis: Bulk Fetch (Pipeline)
+    Redis-->>Runtime: Sensor Values
+    
+    Runtime->>RingBuffer: Update Historical Values
+    Runtime->>Rules: Layer 0 Evaluation
+    Runtime->>Rules: Layer 1 Evaluation
+    Runtime->>Rules: Layer N Evaluation
+    
+    Runtime->>Redis: Bulk Write Results (Pipeline)
+    Redis-->>Runtime: Confirmation
+    
+    Runtime->>Runtime: Calculate Cycle Stats
+    Runtime-->>Timer: Complete Cycle
+    deactivate Runtime
+    
+    Note over Timer,Rules: Next 100ms Cycle
