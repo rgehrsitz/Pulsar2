@@ -26,7 +26,8 @@ namespace Pulsar.Compiler.Parsers
         public List<RuleDefinition> ParseRules(string yamlContent, List<string> validSensors)
         {
             var root = _deserializer.Deserialize<RuleRoot>(yamlContent);
-            Debug.WriteLine($"Deserialized root: Rules count = {root.Rules.Count}");
+            Debug.WriteLine($"\nParsed YAML root: Rules count = {root.Rules.Count}");
+
             if (root.Rules.Any())
             {
                 var firstRule = root.Rules.First();
@@ -39,16 +40,44 @@ namespace Pulsar.Compiler.Parsers
 
             foreach (var rule in root.Rules)
             {
+                Debug.WriteLine($"\nProcessing rule: {rule.Name}");
+
                 // Validate sensors and keys
                 ValidateSensors(rule, validSensors);
+
+                // Show actions debug info
+                if (rule.Actions != null)
+                {
+                    foreach (var action in rule.Actions)
+                    {
+                        if (action.SetValue != null)
+                        {
+                            Debug.WriteLine(
+                                $"SetValue action found - Key: {action.SetValue.Key}, Value: {action.SetValue.Value}, Expression: {action.SetValue.ValueExpression}"
+                            );
+                        }
+                    }
+                }
 
                 // Convert to RuleDefinition
                 var ruleDefinition = new RuleDefinition
                 {
                     Name = rule.Name,
+                    Description = rule.Description, // Keeping description from original
                     Conditions = ConvertConditions(rule.Conditions),
                     Actions = ConvertActions(rule.Actions),
                 };
+
+                // Debug converted actions
+                foreach (var action in ruleDefinition.Actions)
+                {
+                    if (action is SetValueAction setValueAction)
+                    {
+                        Debug.WriteLine(
+                            $"Converted action - Key: {setValueAction.Key}, Value: {setValueAction.Value}, Expression: {setValueAction.ValueExpression}"
+                        );
+                    }
+                }
 
                 ruleDefinitions.Add(ruleDefinition);
             }
@@ -232,6 +261,7 @@ namespace Pulsar.Compiler.Parsers
                 if (actionItem?.SetValue != null)
                 {
                     Debug.WriteLine($"  SetValue.Key: {actionItem.SetValue.Key}");
+                    Debug.WriteLine($"  SetValue.Value: {actionItem.SetValue.Value}");
                     Debug.WriteLine(
                         $"  SetValue.ValueExpression: {actionItem.SetValue.ValueExpression}"
                     );
@@ -246,21 +276,28 @@ namespace Pulsar.Compiler.Parsers
                     if (actionItem.SetValue != null)
                     {
                         Debug.WriteLine($"Found SetValue action");
-                        return new SetValueAction
-                            {
-                                Key = actionItem.SetValue.Key,
-                                ValueExpression = actionItem.SetValue.ValueExpression,
-                            } as ActionDefinition;
+                        var setValueAction = new SetValueAction
+                        {
+                            Type = ActionType.SetValue,
+                            Key = actionItem.SetValue.Key,
+                            Value = actionItem.SetValue.Value,
+                            ValueExpression = actionItem.SetValue.ValueExpression,
+                        };
+                        Debug.WriteLine(
+                            $"Created SetValueAction - Key: {setValueAction.Key}, Value: {setValueAction.Value}, Expression: {setValueAction.ValueExpression}"
+                        );
+                        return setValueAction as ActionDefinition;
                     }
 
                     if (actionItem.SendMessage != null)
                     {
                         Debug.WriteLine($"Found SendMessage action");
                         return new SendMessageAction
-                            {
-                                Channel = actionItem.SendMessage.Channel,
-                                Message = actionItem.SendMessage.Message,
-                            } as ActionDefinition;
+                        {
+                            Type = ActionType.SendMessage,
+                            Channel = actionItem.SendMessage.Channel,
+                            Message = actionItem.SendMessage.Message,
+                        } as ActionDefinition;
                     }
 
                     Debug.WriteLine($"No valid action type found");
@@ -281,6 +318,10 @@ namespace Pulsar.Compiler.Parsers
     public class Rule
     {
         public string Name { get; set; } = string.Empty;
+
+        [YamlMember(Alias = "description")]
+        public string? Description { get; set; }
+
         public ConditionGroupYaml Conditions { get; set; } = new();
         public List<ActionListItem> Actions { get; set; } = new();
     }
@@ -327,8 +368,14 @@ namespace Pulsar.Compiler.Parsers
 
     public class SetValueActionYaml
     {
+        [YamlMember(Alias = "key")]
         public string Key { get; set; } = string.Empty;
-        public string ValueExpression { get; set; } = string.Empty;
+
+        [YamlMember(Alias = "value")]
+        public double? Value { get; set; }
+
+        [YamlMember(Alias = "value_expression")]
+        public string? ValueExpression { get; set; }
     }
 
     public class SendMessageActionYaml

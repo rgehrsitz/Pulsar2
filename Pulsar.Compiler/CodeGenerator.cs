@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using Pulsar.Compiler.Models;
 
 namespace Pulsar.Compiler.Generation
@@ -160,28 +161,89 @@ namespace Pulsar.Compiler.Generation
             );
             builder.AppendLine("    {");
 
+            // Add debug output at start of layer
+            builder.AppendLine(
+                $"        System.Diagnostics.Debug.WriteLine(\"Evaluating Layer {layer}\");"
+            );
+            builder.AppendLine("        System.Diagnostics.Debug.WriteLine(\"Current inputs:\");");
+            builder.AppendLine("        foreach(var kvp in inputs)");
+            builder.AppendLine("        {");
+            builder.AppendLine(
+                "            System.Diagnostics.Debug.WriteLine($\"  {kvp.Key}: {kvp.Value}\");"
+            );
+            builder.AppendLine("        }");
+
             foreach (var rule in rules)
             {
                 builder.AppendLine($"        // Rule: {rule.Name}");
+                builder.AppendLine(
+                    $"        System.Diagnostics.Debug.WriteLine(\"Evaluating rule: {rule.Name}\");"
+                );
 
                 string? condition = GenerateCondition(rule.Conditions);
-                Debug.WriteLine($"Generated condition: {condition}");
+                System.Diagnostics.Debug.WriteLine($"Generated condition: {condition}");
 
                 if (!string.IsNullOrEmpty(condition))
                 {
+                    // For the debug line, escape the condition string properly
+                    var escapedCondition = condition.Replace("\"", "\\\"");
+                    builder.AppendLine(
+                        $"        System.Diagnostics.Debug.WriteLine(\"Checking condition: {escapedCondition}\");"
+                    );
+
                     builder.AppendLine($"        if ({condition})");
                     builder.AppendLine("        {");
+                    builder.AppendLine(
+                        "            System.Diagnostics.Debug.WriteLine(\"Condition is true, executing actions\");"
+                    );
                     GenerateActions(builder, rule.Actions);
+                    builder.AppendLine("        }");
+                    builder.AppendLine("        else");
+                    builder.AppendLine("        {");
+                    builder.AppendLine(
+                        "            System.Diagnostics.Debug.WriteLine(\"Condition is false, skipping actions\");"
+                    );
                     builder.AppendLine("        }");
                 }
                 else
                 {
+                    builder.AppendLine(
+                        "            System.Diagnostics.Debug.WriteLine(\"No conditions, executing actions directly\");"
+                    );
                     GenerateActions(builder, rule.Actions);
                 }
             }
 
+            // Add debug output at end of layer
+            builder.AppendLine("        System.Diagnostics.Debug.WriteLine(\"Current outputs:\");");
+            builder.AppendLine("        foreach(var kvp in outputs)");
+            builder.AppendLine("        {");
+            builder.AppendLine(
+                "            System.Diagnostics.Debug.WriteLine($\"  {kvp.Key}: {kvp.Value}\");"
+            );
+            builder.AppendLine("        }");
+
             builder.AppendLine("    }");
             builder.AppendLine();
+        }
+
+        private static string FixupExpression(string expression)
+        {
+            // Matches valid sensor names (alphanumeric and underscore)
+            var pattern = @"\b[a-zA-Z_][a-zA-Z0-9_]*\b";
+            return Regex.Replace(
+                expression,
+                pattern,
+                match =>
+                {
+                    // Don't wrap Math functions or numeric constants
+                    if (match.Value.StartsWith("Math.") || double.TryParse(match.Value, out _))
+                    {
+                        return match.Value;
+                    }
+                    return $"inputs[\"{match.Value}\"]";
+                }
+            );
         }
 
         private static string? GenerateCondition(ConditionGroup? conditions)
@@ -213,22 +275,19 @@ namespace Pulsar.Compiler.Generation
                     }
                     else if (condition is ExpressionCondition expr)
                     {
-                        // Expression needs parentheses if it:
-                        // - Contains function calls (Math.)
-                        // - Contains arithmetic operators (+ - * /)
-                        // - Contains multiple conditions (&& ||)
+                        var fixedExpression = FixupExpression(expr.Expression);
                         bool needsParentheses =
-                            expr.Expression.Contains("Math.")
-                            || expr.Expression.Contains("+")
-                            || expr.Expression.Contains("-")
-                            || expr.Expression.Contains("*")
-                            || expr.Expression.Contains("/")
-                            || expr.Expression.Contains("&&")
-                            || expr.Expression.Contains("||");
+                            fixedExpression.Contains("Math.")
+                            || fixedExpression.Contains("+")
+                            || fixedExpression.Contains("-")
+                            || fixedExpression.Contains("*")
+                            || fixedExpression.Contains("/")
+                            || fixedExpression.Contains("&&")
+                            || fixedExpression.Contains("||");
 
-                        conditionStr = needsParentheses ? $"({expr.Expression})" : expr.Expression;
+                        conditionStr = needsParentheses ? $"({fixedExpression})" : fixedExpression;
                         Debug.WriteLine(
-                            $"Expression '{expr.Expression}' {(needsParentheses ? "needs" : "does not need")} parentheses"
+                            $"Expression '{expr.Expression}' converted to '{conditionStr}'"
                         );
                     }
                     else if (condition is ConditionGroup group)
@@ -360,13 +419,16 @@ namespace Pulsar.Compiler.Generation
                 }
                 else if (!string.IsNullOrEmpty(action.ValueExpression))
                 {
-                    valueAssignment = action.ValueExpression;
+                    valueAssignment = FixupExpression(action.ValueExpression);
                 }
                 else
                 {
                     valueAssignment = "0";
                 }
 
+                builder.AppendLine(
+                    $"            System.Diagnostics.Debug.WriteLine(\"Setting {action.Key} to {valueAssignment}\");"
+                );
                 builder.AppendLine($"            outputs[\"{action.Key}\"] = {valueAssignment};");
             }
         }
