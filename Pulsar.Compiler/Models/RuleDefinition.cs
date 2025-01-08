@@ -18,6 +18,25 @@ namespace Pulsar.Compiler.Models
         public new ConditionType Type { get; set; } = ConditionType.Group;
         public List<ConditionDefinition> All { get; set; } = new List<ConditionDefinition>();
         public List<ConditionDefinition> Any { get; set; } = new List<ConditionDefinition>();
+        public ConditionGroup? Parent { get; private set; }
+
+        public void AddToAll(ConditionDefinition condition)
+        {
+            if (condition is ConditionGroup group)
+            {
+                group.Parent = this;
+            }
+            All.Add(condition);
+        }
+
+        public void AddToAny(ConditionDefinition condition)
+        {
+            if (condition is ConditionGroup group)
+            {
+                group.Parent = this;
+            }
+            Any.Add(condition);
+        }
     }
 
     public abstract class ConditionDefinition
@@ -30,7 +49,7 @@ namespace Pulsar.Compiler.Models
         Comparison,
         Expression,
         ThresholdOverTime,
-        Group
+        Group,
     }
 
     public class ComparisonCondition : ConditionDefinition
