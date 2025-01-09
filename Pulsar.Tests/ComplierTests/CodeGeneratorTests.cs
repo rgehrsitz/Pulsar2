@@ -74,7 +74,12 @@ namespace Pulsar.Tests.CompilerTests
                 },
                 Actions = new List<ActionDefinition>
                 {
-                    new SetValueAction { Key = "intermediate", Value = 1 },
+                    new SetValueAction
+                    {
+                        Type = ActionType.SetValue,
+                        Key = "intermediate",
+                        Value = 1,
+                    },
                 },
             };
 
@@ -96,7 +101,12 @@ namespace Pulsar.Tests.CompilerTests
                 },
                 Actions = new List<ActionDefinition>
                 {
-                    new SetValueAction { Key = "output", Value = 2 },
+                    new SetValueAction
+                    {
+                        Type = ActionType.SetValue,
+                        Key = "output",
+                        Value = 2,
+                    },
                 },
             };
 
@@ -107,7 +117,7 @@ namespace Pulsar.Tests.CompilerTests
             Assert.Contains("EvaluateLayer0", code);
             Assert.Contains("EvaluateLayer1", code);
             Assert.Contains("inputs[\"temp1\"] > 50", code);
-            Assert.Contains("inputs[\"intermediate\"] == 1", code);
+            Assert.Contains("outputs[\"intermediate\"] == 1", code);
         }
 
         [Fact]
