@@ -1,17 +1,32 @@
+// File: Pulsar.Compiler/CodeGenerator.cs
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Pulsar.Compiler.Models;
 
 namespace Pulsar.Compiler.Generation
 {
     public class CodeGenerator
     {
+        private static Dictionary<string, RuleDefinition> _outputs = new();
+
         public static string GenerateCSharp(List<RuleDefinition> sortedRules)
         {
+            // Store outputs from rules
+            _outputs.Clear();
+            foreach (var rule in sortedRules)
+            {
+                foreach (var action in rule.Actions.OfType<SetValueAction>())
+                {
+                    _outputs[action.Key] = rule;
+                }
+            }
             ArgumentNullException.ThrowIfNull(sortedRules, nameof(sortedRules));
 
             var codeBuilder = new StringBuilder();
@@ -227,23 +242,128 @@ namespace Pulsar.Compiler.Generation
             builder.AppendLine();
         }
 
-        private static string FixupExpression(string expression)
+        public static string FixupExpression(string expression)
         {
-            // Matches valid sensor names (alphanumeric and underscore)
-            var pattern = @"\b[a-zA-Z_][a-zA-Z0-9_]*\b";
-            return Regex.Replace(
-                expression,
-                pattern,
-                match =>
+            var pattern =
+                @"(?<function>Math\.\w+)|(?<number>\d*\.?\d+)|(?<operator>[+\-*/><]=?|==|!=)|(?<variable>[a-zA-Z_][a-zA-Z0-9_]*)|(?<parentheses>[\(\)])";
+
+            var tokenized = new List<string>();
+            int position = 0;
+
+            foreach (Match match in Regex.Matches(expression, pattern))
+            {
+                // Add any skipped characters (spaces typically)
+                if (match.Index > position)
                 {
-                    // Don't wrap Math functions or numeric constants
-                    if (match.Value.StartsWith("Math.") || double.TryParse(match.Value, out _))
-                    {
-                        return match.Value;
-                    }
-                    return $"inputs[\"{match.Value}\"]";
+                    tokenized.Add(expression.Substring(position, match.Index - position));
                 }
-            );
+
+                var token = match.Value;
+
+                if (match.Groups["function"].Success)
+                {
+                    // Math functions remain unchanged
+                    tokenized.Add(token);
+                }
+                else if (match.Groups["number"].Success)
+                {
+                    // Numbers remain unchanged
+                    tokenized.Add(token);
+                }
+                else if (match.Groups["operator"].Success)
+                {
+                    // Operators remain unchanged
+                    tokenized.Add(token);
+                }
+                else if (match.Groups["variable"].Success)
+                {
+                    // Check if it's a Math function argument
+                    bool isAfterMathDot = false;
+                    if (match.Index >= 5)
+                    {
+                        var precedingText = expression.Substring(match.Index - 5, 5);
+                        isAfterMathDot = precedingText.Equals("Math.", StringComparison.Ordinal);
+                    }
+
+                    if (!isAfterMathDot)
+                    {
+                        // Check if this is a computed value
+                        if (_outputs.ContainsKey(token))
+                        {
+                            tokenized.Add($"outputs[\"{token}\"]");
+                        }
+                        else
+                        {
+                            tokenized.Add($"inputs[\"{token}\"]");
+                        }
+                    }
+                    else
+                    {
+                        tokenized.Add(token);
+                    }
+                }
+                else if (match.Groups["parentheses"].Success)
+                {
+                    // Parentheses remain unchanged
+                    tokenized.Add(token);
+                }
+
+                position = match.Index + match.Length;
+            }
+
+            // Add any remaining characters
+            if (position < expression.Length)
+            {
+                tokenized.Add(expression.Substring(position));
+            }
+
+            var result = string.Join("", tokenized).Trim();
+            return NeedsParentheses(result) ? $"({result})" : result;
+        }
+
+        private static bool NeedsParentheses(string expression)
+        {
+            // Add parentheses if the expression:
+            // 1. Contains certain operators (+, -, *, /) AND comparison operators
+            // 2. Contains Math functions
+            // 3. Contains multiple comparison operators
+            var hasArithmetic = Regex.IsMatch(expression, @"[+\-*/]");
+            var hasComparison = Regex.IsMatch(expression, @"[<>]=?|==|!=");
+            var hasMathFunction = expression.Contains("Math.");
+            var hasMultipleComparisons = Regex.Matches(expression, @"[<>]=?|==|!=").Count > 1;
+
+            return (hasArithmetic && hasComparison) || hasMathFunction || hasMultipleComparisons;
+        }
+
+        public static class ExpressionHelper
+        {
+            public static bool ValidateGeneratedExpression(string expression)
+            {
+                try
+                {
+                    // Try to compile the expression
+                    var code =
+                        $@"
+                using System;
+                using System.Collections.Generic;
+                public class Test {{
+                    public bool Evaluate(Dictionary<string, double> inputs) {{
+                        return {expression};
+                    }}
+                }}";
+
+                    var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(code);
+                    var diagnostics = tree.GetDiagnostics();
+                    return !diagnostics.Any(d =>
+                        d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Expression validation failed: {ex.Message}");
+                    return false;
+                }
+            }
         }
 
         private static string? GenerateCondition(ConditionGroup? conditions)
@@ -270,8 +390,17 @@ namespace Pulsar.Compiler.Generation
 
                     if (condition is ComparisonCondition comp)
                     {
-                        conditionStr =
-                            $"inputs[\"{comp.Sensor}\"] {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                        // Check if this sensor is a computed value
+                        if (_outputs.ContainsKey(comp.Sensor))
+                        {
+                            conditionStr = $"outputs[\"{comp.Sensor}\"]";
+                        }
+                        else
+                        {
+                            conditionStr = $"inputs[\"{comp.Sensor}\"]";
+                        }
+                        conditionStr +=
+                            $" {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
                     }
                     else if (condition is ExpressionCondition expr)
                     {
@@ -327,8 +456,17 @@ namespace Pulsar.Compiler.Generation
 
                     if (condition is ComparisonCondition comp)
                     {
-                        conditionStr =
-                            $"inputs[\"{comp.Sensor}\"] {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                        // Check if this sensor is a computed value
+                        if (_outputs.ContainsKey(comp.Sensor))
+                        {
+                            conditionStr = $"outputs[\"{comp.Sensor}\"]";
+                        }
+                        else
+                        {
+                            conditionStr = $"inputs[\"{comp.Sensor}\"]";
+                        }
+                        conditionStr +=
+                            $" {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
                     }
                     else if (condition is ExpressionCondition expr)
                     {
@@ -426,8 +564,10 @@ namespace Pulsar.Compiler.Generation
                     valueAssignment = "0";
                 }
 
+                // Properly escape quotation marks for debug output
+                var escapedAssignment = valueAssignment.Replace("\"", "\\\"");
                 builder.AppendLine(
-                    $"            System.Diagnostics.Debug.WriteLine(\"Setting {action.Key} to {valueAssignment}\");"
+                    $"            System.Diagnostics.Debug.WriteLine(\"Setting {action.Key} to {escapedAssignment}\");"
                 );
                 builder.AppendLine($"            outputs[\"{action.Key}\"] = {valueAssignment};");
             }

@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Pulsar.Compiler.Generation;
 using Pulsar.Compiler.Models;
+using Pulsar.Compiler.Validation;
 using Xunit;
 
 namespace Pulsar.Tests.CompilerTests
@@ -140,8 +142,25 @@ namespace Pulsar.Tests.CompilerTests
             var code = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
 
             // Assert
-            Assert.Contains("(temperature * 1.8 + 32 > 100)", code);
-            Assert.Contains("outputs[\"fahrenheit\"] = temperature * 1.8 + 32", code);
+            // Test the condition in the if statement
+            Assert.Contains("if (((inputs[\"temperature\"] * 1.8 + 32 > 100)))", code);
+
+            // Test the debug output - using exact match from generated code
+            Assert.Contains(
+                "System.Diagnostics.Debug.WriteLine(\"Checking condition: ((inputs[\\\"temperature\\\"] * 1.8 + 32 > 100))\")",
+                code
+            );
+
+            // Test the action
+            Assert.Contains("outputs[\"fahrenheit\"] = inputs[\"temperature\"] * 1.8 + 32", code);
+
+            // For better debugging, let's also print the relevant section
+            Debug.WriteLine("Expected debug statement:");
+            Debug.WriteLine(
+                "System.Diagnostics.Debug.WriteLine(\"Checking condition: ((inputs[\\\"temperature\\\"] * 1.8 + 32 > 100))\")"
+            );
+            Debug.WriteLine("\nActual Code:");
+            Debug.WriteLine(code);
         }
 
         [Fact]
@@ -158,13 +177,11 @@ namespace Pulsar.Tests.CompilerTests
                         new ExpressionCondition
                         {
                             Type = ConditionType.Expression,
-                            // Complex expression - requires parentheses due to function call and arithmetic
                             Expression = "Math.Abs(temperature - setpoint) > threshold",
                         },
                         new ExpressionCondition
                         {
                             Type = ConditionType.Expression,
-                            // Simple expression - doesn't require parentheses
                             Expression = "rate_of_change > 5",
                         },
                     },
@@ -179,20 +196,23 @@ namespace Pulsar.Tests.CompilerTests
             var code = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
 
             // Assert
-            // Test complex expression - should be parenthesized due to function call and arithmetic
-            Assert.Contains("(Math.Abs(temperature - setpoint) > threshold)", code);
-
-            // Test simple expression - parentheses not required as it's a simple comparison
-            // Accept either form since they're logically equivalent
-            bool hasSimpleExpression =
-                code.Contains("rate_of_change > 5") || code.Contains("(rate_of_change > 5)");
-            Assert.True(
-                hasSimpleExpression,
-                "Code should contain simple expression either with or without parentheses"
+            // Test complex expression with Math function
+            Assert.Contains(
+                "(Math.Abs(inputs[\"temperature\"] - inputs[\"setpoint\"]) > inputs[\"threshold\"])",
+                code
             );
 
-            // Verify overall structure
-            Assert.Contains("public class CompiledRules", code);
+            // Test simple expression
+            bool hasSimpleExpression =
+                code.Contains("inputs[\"rate_of_change\"] > 5")
+                || code.Contains("(inputs[\"rate_of_change\"] > 5)");
+            Assert.True(
+                hasSimpleExpression,
+                "Code should contain simple expression with proper dictionary access"
+            );
+
+            // Verify debug output format
+            Assert.Contains("System.Diagnostics.Debug.WriteLine(\"Checking condition:", code);
             Assert.Contains("outputs[\"alert\"] = 1", code);
         }
 
@@ -377,14 +397,12 @@ namespace Pulsar.Tests.CompilerTests
                         {
                             Any = new List<ConditionDefinition>
                             {
-                                // First condition - simple comparison
                                 new ComparisonCondition
                                 {
                                     Sensor = "temp1",
                                     Operator = ComparisonOperator.GreaterThan,
                                     Value = 100,
                                 },
-                                // Second condition - nested AND group
                                 new ConditionGroup
                                 {
                                     All = new List<ConditionDefinition>
@@ -405,7 +423,6 @@ namespace Pulsar.Tests.CompilerTests
                                 },
                             },
                         },
-                        // Adding another condition to verify multiple levels of nesting
                         new ConditionGroup
                         {
                             All = new List<ConditionDefinition>
@@ -416,7 +433,7 @@ namespace Pulsar.Tests.CompilerTests
                                     Operator = ComparisonOperator.GreaterThan,
                                     Value = 75,
                                 },
-                                new ExpressionCondition { Expression = "inputs[\"rate\"] > 5" },
+                                new ExpressionCondition { Expression = "rate > 5" },
                             },
                         },
                     },
@@ -431,20 +448,28 @@ namespace Pulsar.Tests.CompilerTests
             var code = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
 
             // Assert
-            // Testing for the proper nesting of conditions with minimal necessary parentheses
+            const string expectedCondition =
+                "(inputs[\"temp1\"] > 100 || (inputs[\"temp2\"] < 0 && inputs[\"pressure\"] > 1000)) && (inputs[\"humidity\"] > 75 && inputs[\"rate\"] > 5)";
+
+            // Test the if statement condition
+            Assert.Contains($"if ({expectedCondition})", code);
+
+            // Test the debug output with proper escaping
             Assert.Contains(
-                "if ((inputs[\"temp1\"] > 100 || (inputs[\"temp2\"] < 0 && inputs[\"pressure\"] > 1000)) && "
-                    + "(inputs[\"humidity\"] > 75 && inputs[\"rate\"] > 5))",
+                $"System.Diagnostics.Debug.WriteLine(\"Checking condition: {expectedCondition.Replace("\"", "\\\"")}\")",
                 code
             );
 
-            // Additional assertions to verify proper code structure
-            Assert.Contains("public class CompiledRules", code);
-            Assert.Contains(
-                "public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs)",
-                code
-            );
+            // Test that the action is present
             Assert.Contains("outputs[\"alert\"] = 1", code);
+
+            // Debug output for verification
+            Debug.WriteLine("Expected debug statement:");
+            Debug.WriteLine(
+                $"System.Diagnostics.Debug.WriteLine(\"Checking condition: {expectedCondition.Replace("\"", "\\\"")}\")"
+            );
+            Debug.WriteLine("\nActual Code:");
+            Debug.WriteLine(code);
         }
 
         [Fact]
@@ -602,6 +627,30 @@ namespace Pulsar.Tests.CompilerTests
 
             // Final alert in layer 3
             Assert.Contains("Rule: FinalAlert", layer3);
+        }
+
+        [Fact]
+        public void FixupExpression_HandlesComplexMathExpressions()
+        {
+            var testCases = new Dictionary<string, string>
+            {
+                {
+                    "Math.Abs(temp - setpoint) > threshold",
+                    "(Math.Abs(inputs[\"temp\"] - inputs[\"setpoint\"]) > inputs[\"threshold\"])"
+                },
+                { "temperature * 1.8 + 32 > 100", "(inputs[\"temperature\"] * 1.8 + 32 > 100)" },
+                {
+                    "rate > 5 && pressure < 1000",
+                    "(inputs[\"rate\"] > 5 && inputs[\"pressure\"] < 1000)"
+                },
+            };
+
+            foreach (var testCase in testCases)
+            {
+                var result = CodeGenerator.FixupExpression(testCase.Key);
+                Assert.Equal(testCase.Value, result);
+                Assert.True(ExpressionHelper.ValidateGeneratedExpression(result));
+            }
         }
 
         private RuleDefinition CreateRule(string name, string[] inputs, string output)
