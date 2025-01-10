@@ -65,7 +65,7 @@ namespace Pulsar.Compiler.Parsers
                     Name = rule.Name,
                     Description = rule.Description, // Keeping description from original
                     Conditions = ConvertConditions(rule.Conditions),
-                    Actions = ConvertActions(rule.Actions),
+                    Actions = ConvertActions(rule.Actions ?? new List<ActionListItem>()),
                 };
 
                 // Debug converted actions
