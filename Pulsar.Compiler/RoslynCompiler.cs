@@ -23,14 +23,20 @@ namespace Pulsar.Compiler
         private static readonly Counter<int> s_compilationAttempts = s_meter.CreateCounter<int>("pulsar_compilations_total");
         private static readonly Counter<int> s_compilationErrors = s_meter.CreateCounter<int>("pulsar_compilation_errors_total");
         private static readonly Histogram<double> s_compilationDuration = s_meter.CreateHistogram<double>("pulsar_compilation_duration_seconds");
+        public static ILogger s_logger;
 
         static RoslynCompiler()
         {
-            Log.Logger = new LoggerConfiguration()
+            s_logger = new LoggerConfiguration()
                 .MinimumLevel.Debug()
                 .WriteTo.Console()
                 .WriteTo.File("logs.txt", rollingInterval: RollingInterval.Day)
                 .CreateLogger();
+        }
+
+        public static void SetLogger(ILogger logger)
+        {
+            s_logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         public static void CompileSource(string csharpCode, string outputDllPath, bool debug = false)
@@ -52,19 +58,19 @@ namespace Pulsar.Compiler
                 sw.Stop();
                 s_compilationDuration.Record(sw.Elapsed.TotalSeconds);
 
-                Log.Information("Successfully compiled rules to {OutputPath}", outputDllPath);
+                s_logger.Information("Successfully compiled rules to {OutputPath}", outputDllPath);
             }
             catch (Exception ex)
             {
                 s_compilationErrors.Add(1);
-                Log.Error(ex, "Compilation failed for {OutputPath}", outputDllPath);
+                s_logger.Error(ex, "Compilation failed for {OutputPath}", outputDllPath);
                 throw;
             }
         }
 
         private static void ValidateInputs(string csharpCode, string outputDllPath)
         {
-            if (string.IsNullOrEmpty(csharpCode))
+            if (string.IsNullOrWhiteSpace(csharpCode))
                 throw new ArgumentException("Source code cannot be empty", nameof(csharpCode));
 
             if (string.IsNullOrEmpty(outputDllPath))
@@ -102,7 +108,7 @@ namespace Pulsar.Compiler
             var assemblyName = Path.GetFileNameWithoutExtension(outputDllPath);
             var references = GetMetadataReferences();
 
-            Log.Debug("Creating compilation with {ReferenceCount} references", references.Count);
+            s_logger.Debug("Creating compilation with {ReferenceCount} references", references.Count);
 
             return CSharpCompilation.Create(
                 assemblyName,
@@ -163,7 +169,7 @@ namespace Pulsar.Compiler
             // Log all diagnostics for debugging
             foreach (var diagnostic in result.Diagnostics)
             {
-                Log.Debug("Diagnostic: {Id} {Severity} {Message}", diagnostic.Id, diagnostic.Severity, diagnostic.GetMessage());
+                s_logger.Debug("Diagnostic: {Id} {Severity} {Message}", diagnostic.Id, diagnostic.Severity, diagnostic.GetMessage());
             }
 
             // Filter only errors (can expand if necessary)
@@ -178,19 +184,18 @@ namespace Pulsar.Compiler
             foreach (var error in errors)
             {
                 errorMessage.AppendLine(error);
-                Log.Error("Compilation error: {Error}", error);
+                s_logger.Error("Compilation error: {Error}", error);
             }
 
             if (errors.Count == 0)
             {
                 // If no errors are captured, add a fallback message
-                Log.Error("Compilation failed, but no error diagnostics were captured.");
+                s_logger.Error("Compilation failed, but no error diagnostics were captured.");
                 errorMessage.AppendLine("No diagnostic errors were captured.");
             }
 
             throw new CompilationException(errorMessage.ToString());
         }
-
 
         private static string FormatDiagnostic(Diagnostic diagnostic)
         {
@@ -209,27 +214,27 @@ namespace Pulsar.Compiler
             }
 
             var requiredAssemblies = new HashSet<string>
-    {
-        // Core functionality
-        "System.Runtime.dll",
-        "System.Collections.dll",
-        "System.Private.CoreLib.dll",
-        "System.Console.dll",
-        "System.Linq.dll",
-        "System.Collections.Generic.dll",
-        "System.Math.dll",
-        "System.Threading.dll",
-        "System.IO.dll",
+            {
+                // Core functionality
+                "System.Runtime.dll",
+                "System.Collections.dll",
+                "System.Private.CoreLib.dll",
+                "System.Console.dll",
+                "System.Linq.dll",
+                "System.Collections.Generic.dll",
+                "System.Math.dll",
+                "System.Threading.dll",
+                "System.IO.dll",
 
-        // Diagnostics & Monitoring
-        "System.Diagnostics.Debug.dll",
-        "System.Diagnostics.DiagnosticSource.dll",
-        "System.Diagnostics.Metrics.dll",
+                // Diagnostics & Monitoring
+                "System.Diagnostics.Debug.dll",
+                "System.Diagnostics.DiagnosticSource.dll",
+                "System.Diagnostics.Metrics.dll",
 
-        // Redis Dependencies
-        "StackExchange.Redis.dll",
-        "NRedisStack.dll"
-    };
+                // Redis Dependencies
+                "StackExchange.Redis.dll",
+                "NRedisStack.dll"
+            };
 
             var addedAssemblies = new HashSet<string>(); // To track added assembly names
             foreach (var assemblyPath in trustedAssembliesPath.Split(Path.PathSeparator))
@@ -241,11 +246,11 @@ namespace Pulsar.Compiler
                     {
                         references.Add(MetadataReference.CreateFromFile(assemblyPath));
                         addedAssemblies.Add(fileName);
-                        Log.Debug("Added reference: {Assembly}", assemblyPath);
+                        s_logger.Debug("Added reference: {Assembly}", assemblyPath);
                     }
                     catch (Exception ex)
                     {
-                        Log.Warning(ex, "Failed to load assembly {Assembly}", assemblyPath);
+                        s_logger.Warning(ex, "Failed to load assembly {Assembly}", assemblyPath);
                     }
                 }
             }
@@ -259,14 +264,14 @@ namespace Pulsar.Compiler
                 {
                     references.Add(reference);
                     addedAssemblies.Add(fileName);
-                    Log.Debug("Added NuGet reference: {Assembly}", reference.Display);
+                    s_logger.Debug("Added NuGet reference: {Assembly}", reference.Display);
                 }
             }
 
             // Log all loaded references for debugging
             foreach (var reference in references)
             {
-                Log.Information("Loaded reference: {ReferenceDisplay}", reference.Display);
+                s_logger.Information("Loaded reference: {ReferenceDisplay}", reference.Display);
             }
 
             if (!references.Any())
@@ -276,7 +281,6 @@ namespace Pulsar.Compiler
 
             return references;
         }
-
 
         private static IEnumerable<MetadataReference> GetNuGetReferences()
         {
@@ -308,13 +312,13 @@ namespace Pulsar.Compiler
                         if (dllPath != null)
                         {
                             references.Add(MetadataReference.CreateFromFile(dllPath));
-                            Log.Debug("Added NuGet reference: {Assembly}", dllPath);
+                            s_logger.Debug("Added NuGet reference: {Assembly}", dllPath);
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log.Warning(ex, "Failed to load NuGet package {Package}", package);
+                    s_logger.Warning(ex, "Failed to load NuGet package {Package}", package);
                 }
             }
             return references;
@@ -326,12 +330,12 @@ namespace Pulsar.Compiler
     {
         public CompilationException(string message) : base(message)
         {
-            Log.Error("Compilation Exception: {Message}", message);
+            RoslynCompiler.s_logger.Error("Compilation Exception: {Message}", message);
         }
 
         public CompilationException(string message, Exception inner) : base(message, inner)
         {
-            Log.Error(inner, "Compilation Exception: {Message}", message);
+            RoslynCompiler.s_logger.Error(inner, "Compilation Exception: {Message}", message);
         }
     }
 }

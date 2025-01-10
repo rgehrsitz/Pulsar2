@@ -9,6 +9,7 @@ using Xunit.Abstractions;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
+using Serilog.Sinks.XUnit;
 using Pulsar.Compiler;
 
 namespace Pulsar.Tests.CompilerTests
@@ -42,11 +43,14 @@ namespace Pulsar.Tests.CompilerTests
             Serilog.Debugging.SelfLog.Enable(Console.Error);
 
             // Configure Serilog for testing
-            Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Debug()
+            var logger = new LoggerConfiguration()
+                .MinimumLevel.Verbose()
                 .WriteTo.File(Path.Combine(Directory.GetCurrentDirectory(), "TestLogs.log"), rollingInterval: RollingInterval.Day)
                 .WriteTo.Sink(new ListSink(_logMessages))
+                .WriteTo.TestOutput(_output)  // Add test output for debugging
                 .CreateLogger();
+
+            RoslynCompiler.SetLogger(logger);
 
             _testOutputPath = Path.Combine(
                 Path.GetTempPath(),
@@ -88,22 +92,22 @@ namespace Pulsar.Tests.CompilerTests
         public void CompileSource_ValidCode_CreatesAssembly()
         {
             // Arrange
-            const string validCode = @"
-        using System;
-        using System.Collections.Generic;
+            var validCode = @"
+            using System;
+            using System.Collections.Generic;
 
-        public class TestClass
-        {
-            public Dictionary<string, double> Process(Dictionary<string, double> input)
+            public class TestClass
             {
-                var output = new Dictionary<string, double>();
-                foreach(var kvp in input)
+                public Dictionary<string, double> Process(Dictionary<string, double> input)
                 {
-                    output[kvp.Key] = kvp.Value * 2;
+                    var output = new Dictionary<string, double>();
+                    foreach (var kvp in input)
+                    {
+                        output[kvp.Key] = kvp.Value * 2;
+                    }
+                    return output;
                 }
-                return output;
-            }
-        }";
+            }";
 
             // Act
             RoslynCompiler.CompileSource(validCode, _testOutputPath);
@@ -112,7 +116,7 @@ namespace Pulsar.Tests.CompilerTests
             Assert.True(File.Exists(_testOutputPath), "The output DLL should be created.");
 
             // Verify the log message is captured
-            Assert.Contains("Successfully compiled rules to", _logMessages);
+            AssertContainsLog("Successfully compiled rules");
 
             // Load and test the compiled assembly
             var assembly = Assembly.LoadFile(_testOutputPath);
@@ -160,14 +164,20 @@ namespace Pulsar.Tests.CompilerTests
         [InlineData(" ")]
         public void CompileSource_InvalidInputs_ThrowsArgumentException(string code)
         {
-            Assert.Throws<ArgumentException>(
+            var ex = Assert.Throws<ArgumentException>(
                 () => RoslynCompiler.CompileSource(code, _testOutputPath)
             );
-            AssertContainsLog("Source code cannot be empty");
+            Assert.Equal("Source code cannot be empty (Parameter 'csharpCode')", ex.Message);
         }
 
         private void AssertContainsLog(string expectedText)
         {
+            // Dump all log messages for debugging
+            foreach (var msg in _logMessages)
+            {
+                _output.WriteLine($"Log message: {msg}");
+            }
+
             Assert.Contains(_logMessages, msg => msg.Contains(expectedText));
         }
     }
