@@ -255,23 +255,25 @@ namespace Pulsar.Compiler
                 }
             }
 
-            // Add NuGet package references if not found in trusted assemblies
-            var nugetReferences = GetNuGetReferences();
-            foreach (var reference in nugetReferences)
+            // Add explicit reference to Pulsar.Runtime.dll
+            var currentDirectory = AppContext.BaseDirectory;
+            var rootDirectory = FindSolutionRoot(currentDirectory);
+            if (rootDirectory == null)
             {
-                var fileName = Path.GetFileName(reference.Display);
-                if (!addedAssemblies.Contains(fileName))
-                {
-                    references.Add(reference);
-                    addedAssemblies.Add(fileName);
-                    s_logger.Debug("Added NuGet reference: {Assembly}", reference.Display);
-                }
+                throw new InvalidOperationException("Unable to locate the solution root directory.");
             }
 
-            // Log all loaded references for debugging
-            foreach (var reference in references)
+            var pulsarRuntimePath = Path.Combine(rootDirectory, "Pulsar.Runtime", "bin", "Debug", "net9.0", "Pulsar.Runtime.dll");
+
+            if (File.Exists(pulsarRuntimePath))
             {
-                s_logger.Information("Loaded reference: {ReferenceDisplay}", reference.Display);
+                references.Add(MetadataReference.CreateFromFile(pulsarRuntimePath));
+                s_logger.Information("Added reference to Pulsar.Runtime: {Path}", pulsarRuntimePath);
+            }
+            else
+            {
+                s_logger.Error("Pulsar.Runtime.dll not found at {Path}", pulsarRuntimePath);
+                throw new FileNotFoundException($"Pulsar.Runtime.dll not found at {pulsarRuntimePath}");
             }
 
             if (!references.Any())
@@ -282,15 +284,29 @@ namespace Pulsar.Compiler
             return references;
         }
 
+        private static string? FindSolutionRoot(string startDirectory)
+        {
+            var directory = new DirectoryInfo(startDirectory);
+            while (directory != null)
+            {
+                if (directory.GetFiles("*.sln").Any())
+                {
+                    return directory.FullName;
+                }
+                directory = directory.Parent;
+            }
+            return null;
+        }
+
         private static IEnumerable<MetadataReference> GetNuGetReferences()
         {
             var nugetPackages = new[]
             {
-        "NRedisStack",
-        "StackExchange.Redis",
-        "Serilog",
-        "prometheus-net"
-    };
+                "NRedisStack",
+                "StackExchange.Redis",
+                "Serilog",
+                "prometheus-net"
+            };
 
             var references = new List<MetadataReference>();
             var nugetPath = Path.Combine(

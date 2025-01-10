@@ -3,12 +3,14 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Pulsar.Compiler.Models;
+using Pulsar.Runtime.Buffers;
 
 namespace Pulsar.Compiler.Generation
 {
@@ -32,14 +34,16 @@ namespace Pulsar.Compiler.Generation
             var codeBuilder = new StringBuilder();
             codeBuilder.AppendLine("using System;");
             codeBuilder.AppendLine("using System.Collections.Generic;");
+            codeBuilder.AppendLine("using Pulsar.Runtime.Buffers;");
+            codeBuilder.AppendLine("using Pulsar;");
             codeBuilder.AppendLine();
             codeBuilder.AppendLine("public class CompiledRules");
             codeBuilder.AppendLine("{");
 
             // Generate main evaluation method
             codeBuilder.AppendLine(
-                "    public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs)"
-            );
+                "    public void Evaluate(Dictionary<string, double> inputs, " +
+                "Dictionary<string, double> outputs, RingBufferManager bufferManager)");
             codeBuilder.AppendLine("    {");
 
             // Get distinct layers
@@ -49,7 +53,7 @@ namespace Pulsar.Compiler.Generation
             // Call each layer's evaluation method in order
             foreach (var layer in layers)
             {
-                codeBuilder.AppendLine($"        EvaluateLayer{layer}(inputs, outputs);");
+                codeBuilder.AppendLine($"        EvaluateLayer{layer}(inputs, outputs, bufferManager);");
             }
             codeBuilder.AppendLine("    }");
             codeBuilder.AppendLine();
@@ -172,8 +176,8 @@ namespace Pulsar.Compiler.Generation
         )
         {
             builder.AppendLine(
-                $"    private void EvaluateLayer{layer}(Dictionary<string, double> inputs, Dictionary<string, double> outputs)"
-            );
+                $"    private void EvaluateLayer{layer}(Dictionary<string, double> inputs, " +
+                "Dictionary<string, double> outputs, RingBufferManager bufferManager)");
             builder.AppendLine("    {");
 
             // Add debug output at start of layer
@@ -383,9 +387,7 @@ namespace Pulsar.Compiler.Generation
                 var allConditions = new List<string>();
                 foreach (var condition in conditions.All)
                 {
-                    Debug.WriteLine(
-                        $"Processing All condition of type: {condition.GetType().Name}"
-                    );
+                    Debug.WriteLine($"Processing All condition of type: {condition.GetType().Name}");
                     string? conditionStr = null;
 
                     if (condition is ComparisonCondition comp)
@@ -399,8 +401,12 @@ namespace Pulsar.Compiler.Generation
                         {
                             conditionStr = $"inputs[\"{comp.Sensor}\"]";
                         }
-                        conditionStr +=
-                            $" {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                        conditionStr += $" {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                    }
+                    else if (condition is ThresholdOverTimeCondition temporal)
+                    {
+                        var duration = $"TimeSpan.FromMilliseconds({temporal.Duration})";
+                        conditionStr = $"bufferManager.IsAboveThresholdForDuration(\"{temporal.Sensor}\", {temporal.Threshold}, {duration})";
                     }
                     else if (condition is ExpressionCondition expr)
                     {
@@ -415,9 +421,7 @@ namespace Pulsar.Compiler.Generation
                             || fixedExpression.Contains("||");
 
                         conditionStr = needsParentheses ? $"({fixedExpression})" : fixedExpression;
-                        Debug.WriteLine(
-                            $"Expression '{expr.Expression}' converted to '{conditionStr}'"
-                        );
+                        Debug.WriteLine($"Expression '{expr.Expression}' converted to '{conditionStr}'");
                     }
                     else if (condition is ConditionGroup group)
                     {
@@ -446,7 +450,7 @@ namespace Pulsar.Compiler.Generation
                 }
             }
 
-            // Handle Any conditions with the same expression handling
+            // Handle Any conditions
             if (conditions.Any?.Any() == true)
             {
                 var anyConditions = new List<string>();
@@ -465,12 +469,15 @@ namespace Pulsar.Compiler.Generation
                         {
                             conditionStr = $"inputs[\"{comp.Sensor}\"]";
                         }
-                        conditionStr +=
-                            $" {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                        conditionStr += $" {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                    }
+                    else if (condition is ThresholdOverTimeCondition temporal)
+                    {
+                        var duration = $"TimeSpan.FromMilliseconds({temporal.Duration})";
+                        conditionStr = $"bufferManager.IsAboveThresholdForDuration(\"{temporal.Sensor}\", {temporal.Threshold}, {duration})";
                     }
                     else if (condition is ExpressionCondition expr)
                     {
-                        // Same expression complexity check for ANY conditions
                         bool needsParentheses =
                             expr.Expression.Contains("Math.")
                             || expr.Expression.Contains("+")
@@ -481,9 +488,7 @@ namespace Pulsar.Compiler.Generation
                             || expr.Expression.Contains("||");
 
                         conditionStr = needsParentheses ? $"({expr.Expression})" : expr.Expression;
-                        Debug.WriteLine(
-                            $"Expression '{expr.Expression}' {(needsParentheses ? "needs" : "does not need")} parentheses"
-                        );
+                        Debug.WriteLine($"Expression '{expr.Expression}' {(needsParentheses ? "needs" : "does not need")} parentheses");
                     }
                     else if (condition is ConditionGroup group)
                     {

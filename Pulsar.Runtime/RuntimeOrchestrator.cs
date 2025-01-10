@@ -5,6 +5,7 @@ using Serilog;
 using Pulsar.Runtime.Services;
 
 namespace Pulsar.Runtime;
+using Pulsar.Runtime.Buffers;
 
 public class RuntimeOrchestrator : IDisposable
 {
@@ -20,12 +21,14 @@ public class RuntimeOrchestrator : IDisposable
     private Task? _executionTask;
     private DateTime _lastWarningTime = DateTime.MinValue;
     private bool _disposed;
+    private readonly RingBufferManager _bufferManager;
 
     public RuntimeOrchestrator(
         IRedisService redis,
         ILogger logger,
         string[] requiredSensors,
-        TimeSpan? cycleTime = null)
+        TimeSpan? cycleTime = null,
+        int bufferCapacity = 100)  // Add buffer capacity parameter
     {
         _redis = redis;
         _logger = logger;
@@ -33,11 +36,13 @@ public class RuntimeOrchestrator : IDisposable
         _cts = new CancellationTokenSource();
         _cycleTime = cycleTime ?? TimeSpan.FromMilliseconds(100);
         _timer = new PeriodicTimer(_cycleTime);
+        _bufferManager = new RingBufferManager(bufferCapacity);  // Initialize buffer manager
 
         _logger.Information(
-            "Runtime orchestrator initialized with {SensorCount} sensors and {CycleTime}ms cycle time",
+            "Runtime orchestrator initialized with {SensorCount} sensors, {CycleTime}ms cycle time, and {BufferCapacity} buffer capacity",
             requiredSensors.Length,
-            _cycleTime.TotalMilliseconds);
+            _cycleTime.TotalMilliseconds,
+            bufferCapacity);
     }
 
     public void LoadRules(string dllPath)
@@ -114,7 +119,6 @@ public class RuntimeOrchestrator : IDisposable
 
     public async Task ExecuteCycleAsync()
     {
-        // Guard: throw ObjectDisposedException if we're already disposed
         if (_disposed)
         {
             throw new ObjectDisposedException(
@@ -131,16 +135,23 @@ public class RuntimeOrchestrator : IDisposable
             // Get all sensor values in bulk
             var inputs = await _redis.GetSensorValuesAsync(_requiredSensors);
 
-            // Execute rules
+            // Update ring buffers before rule evaluation
+            _bufferManager.UpdateBuffers(inputs);
+
+            // Execute rules with access to both current values and buffer manager
             lock (_rulesLock)
             {
-                _rulesInstance?.Evaluate(inputs, outputs);
+                if (_rulesInstance != null)
+                {
+                    ((dynamic)_rulesInstance).Evaluate(inputs, outputs, _bufferManager);
+                }
             }
 
-            // Write any outputs
+            // Write outputs and update buffers
             if (outputs.Any())
             {
                 await _redis.SetOutputValuesAsync(outputs);
+                _bufferManager.UpdateBuffers(outputs);
             }
 
             // Check cycle time
@@ -174,6 +185,7 @@ public class RuntimeOrchestrator : IDisposable
             disposableRedis.Dispose();
         }
 
-        _disposed = true; // Mark as disposed
+        _bufferManager.Clear();  // Clear all ring buffers
+        _disposed = true;
     }
 }

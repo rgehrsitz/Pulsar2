@@ -522,12 +522,12 @@ namespace Pulsar.Tests.CompilerTests
 
             // Assert
             Assert.Contains(
-                "public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs)",
+                "public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)",
                 code
             );
-            Assert.Contains("EvaluateLayer0(inputs, outputs);", code);
-            Assert.Contains("EvaluateLayer1(inputs, outputs);", code);
-            Assert.Contains("EvaluateLayer2(inputs, outputs);", code);
+            Assert.Contains("EvaluateLayer0(inputs, outputs, bufferManager);", code);
+            Assert.Contains("EvaluateLayer1(inputs, outputs, bufferManager);", code);
+            Assert.Contains("EvaluateLayer2(inputs, outputs, bufferManager);", code);
 
             // Verify layer ordering through method content
             int layer0Pos = code.IndexOf("private void EvaluateLayer0");
@@ -561,18 +561,17 @@ namespace Pulsar.Tests.CompilerTests
 
             // Assert
             Assert.Contains(
-                "public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs)",
+                "public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)",
                 code
             );
-            Assert.Contains("EvaluateLayer0(inputs, outputs);", code);
+            Assert.Contains("EvaluateLayer0(inputs, outputs, bufferManager);", code);
             Assert.DoesNotContain("EvaluateLayer1", code);
 
             // Verify both rules are in layer 0
-            int layer0Pos = code.IndexOf("private void EvaluateLayer0");
-            var layer0 = code.Substring(layer0Pos);
-
-            Assert.Contains("Rule: TempRule", layer0);
-            Assert.Contains("Rule: PressureRule", layer0);
+            var layer0Start = code.IndexOf("private void EvaluateLayer0");
+            var layer0Code = code.Substring(layer0Start);
+            Assert.Contains("Rule: TempRule", layer0Code);
+            Assert.Contains("Rule: PressureRule", layer0Code);
         }
 
         [Fact]

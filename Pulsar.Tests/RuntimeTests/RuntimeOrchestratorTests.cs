@@ -71,19 +71,23 @@ public class RuntimeOrchestratorTests : IDisposable
     {
         var dllPath = Path.Combine(Path.GetTempPath(), $"TestRules_{Guid.NewGuid()}.dll");
         var code = @"
-            using System.Collections.Generic;
-            public class CompiledRules
-            {
-                public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs)
-                {
-                    if (inputs.TryGetValue(""sensor1"", out var value))
-                    {
-                        outputs[""output1""] = value * 2;
-                    }
-                }
-            }";
+        using System.Collections.Generic;
+        using Pulsar.Runtime.Buffers;
 
-        // Compile using RoslynCompiler
+        public class CompiledRules
+        {
+            public void Evaluate(
+                Dictionary<string, double> inputs,
+                Dictionary<string, double> outputs,
+                RingBufferManager bufferManager)
+            {
+                if (inputs.TryGetValue(""sensor1"", out var value))
+                {
+                    outputs[""output1""] = value * 2;
+                }
+            }
+        }";
+
         Pulsar.Compiler.RoslynCompiler.CompileSource(code, dllPath);
         return dllPath;
     }
