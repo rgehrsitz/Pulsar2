@@ -1,6 +1,7 @@
 // File: Pulsar.Runtime/Buffers/CircularBuffer.cs
 
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace Pulsar.Runtime.Buffers;
 
@@ -69,20 +70,83 @@ public class CircularBuffer
 
     public bool IsAboveThresholdForDuration(double threshold, TimeSpan duration)
     {
-        var values = GetValues(duration).ToList();
-        if (!values.Any()) return false;
+        var now = DateTime.UtcNow;
+        var values = GetValues(duration).OrderBy(v => v.Timestamp).ToList();
 
-        // All values must be above threshold
-        return values.All(v => v.Value > threshold);
+        Debug.WriteLine($"\nChecking threshold {threshold} for duration {duration.TotalMilliseconds}ms");
+        Debug.WriteLine($"Found {values.Count} values within duration window:");
+
+        foreach (var value in values)
+        {
+            Debug.WriteLine($"  Time offset: {(value.Timestamp - now).TotalMilliseconds:F1}ms, Value: {value.Value}");
+        }
+
+        if (!values.Any())
+        {
+            Debug.WriteLine("No values found in window");
+            return false;
+        }
+
+        DateTime? startTime = null;
+
+        foreach (var value in values)
+        {
+            if (value.Value > threshold)
+            {
+                if (startTime == null)
+                {
+                    startTime = value.Timestamp;
+                    Debug.WriteLine($"Found value above threshold, starting timer at offset {(startTime.Value - now).TotalMilliseconds:F1}ms");
+                }
+
+                var currentDuration = value.Timestamp - startTime.Value;
+                Debug.WriteLine($"Current duration: {currentDuration.TotalMilliseconds:F1}ms");
+
+                if (currentDuration >= duration)
+                {
+                    Debug.WriteLine("Duration met - returning true");
+                    return true;
+                }
+            }
+            else
+            {
+                if (startTime != null)
+                {
+                    Debug.WriteLine($"Value {value.Value} below threshold, resetting timer");
+                }
+                startTime = null;
+            }
+        }
+
+        Debug.WriteLine("Duration not met - returning false");
+        return false;
     }
 
     public bool IsBelowThresholdForDuration(double threshold, TimeSpan duration)
     {
-        var values = GetValues(duration).ToList();
+        var values = GetValues(duration).OrderBy(v => v.Timestamp).ToList();
         if (!values.Any()) return false;
 
-        // All values must be below threshold
-        return values.All(v => v.Value < threshold);
+        DateTime? startTime = null;
+
+        foreach (var value in values)
+        {
+            if (value.Value < threshold)
+            {
+                startTime ??= value.Timestamp;
+
+                if (value.Timestamp - startTime.Value >= duration)
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                startTime = null;
+            }
+        }
+
+        return false;
     }
 }
 
