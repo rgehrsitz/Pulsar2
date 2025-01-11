@@ -1,0 +1,19 @@
+The Two Modes, Conceptually:
+
+Strict Discrete
+You only trust explicit data points.
+If you have no new reading in the last 200 ms, you assume nothing. The sensor might have changed.
+The ring buffer logic is correct for that scenario—where “continuously above threshold” is interpreted as “every data point that arrived in that window was above threshold, with no data point below threshold in between.”
+
+Extended Last-Known Reading
+Once you get a reading above threshold at time 
+𝑇, you treat the sensor as still at or above threshold for any subsequent times until you see a reading that contradicts it.
+In effect, you “fill in” all the times between 𝑇 and now with that last value. If a new data point arrives that is below threshold, you reset.
+This approach is common if you have slow sensor updates but assume “no news is good news.”
+
+Put another way:
+Strict mode:
+– No assumptions or interpolation.
+– Requires full time coverage verified by explicit data (using the reading immediately prior if needed) to confirm that the sensor was continuously above threshold.
+Extended last-known mode:
+– Would assume the sensor remains at its last reported value until a new report contradicts it.

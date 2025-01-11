@@ -1,0 +1,73 @@
+1. Calculating Capacity Based on Your Use Case
+A ring buffer (or circular buffer) has a fixed capacity—once you fill it, adding a new item overwrites the oldest. Therefore, to ensure your buffer always contains at least the last XXXX ms of data:
+
+Determine the data sampling rate.
+
+If you fetch from Redis once every 
+𝑃
+P milliseconds, your sampling frequency is 
+1000
+𝑃
+P
+1000
+​
+  samples per second (if 
+𝑃
+P is in ms).
+For example, if you fetch data every 100 ms, that’s 10 samples/second.
+Identify your largest needed time window.
+
+For instance, if your largest threshold-based check or time window is 5 seconds, you want to be able to look at the last 5 seconds of data.
+Multiply (sampling frequency) 
+×
+× (largest time window) 
+±
+± overhead.
+
+Continuing the example: 10 samples/second * 5 seconds = 50 samples.
+Add a little overhead (maybe 10–20%) to guard against slight variations in timing. So you might choose a capacity of 60 or 70 in this example.
+Use that capacity when instantiating each CircularBuffer.
+
+E.g., new CircularBuffer(60).
+With that approach, the ring buffer always holds enough data to cover your largest time window. Any older data beyond that capacity is automatically overwritten and thus never considered by your threshold checks.
+
+2. Ensuring GetValues Only Returns the Last XXXX ms
+In your code, CircularBuffer.GetValues(TimeSpan duration, ...) already filters out older data by comparing each timestamp to DateTime.UtcNow - duration. That means even though you might store slightly more than XXXX ms of data (for safety), the retrieval logic naturally only returns the subset that’s within the requested time window.
+
+As long as your buffer capacity is sufficient to hold that entire window of data points, you’ll never lose relevant data—and you’ll never have older, stale data interfering with your logic.
+
+3. Putting It All Together at Startup
+You mentioned deriving the capacity from various startup options, such as:
+
+Periodicity of your Redis fetch (i.e., how frequently new samples arrive).
+Size or importance of the data type (you might give more buffer space for critical sensors).
+Longest temporal threshold you might check (some rules might require 5 seconds, some 10, etc.).
+A straightforward approach might be:
+
+Find the largest required time window across all rules (e.g., 10 seconds).
+Determine fetch frequency (e.g., every 100 ms → 10 samples/second).
+Calculate capacity = frequency * max_window_in_seconds * overhead_factor.
+Instantiate your ring buffer(s) with that capacity.
+Or, if different sensors/rules have different maximum time windows, you can instantiate each sensor’s buffer with a capacity derived from that sensor’s largest window.
+
+4. Example: A Simplified Calculation
+Suppose:
+
+You poll Redis every 250 ms (4 samples/second).
+Your largest time window is 3 seconds.
+Overhead factor = 20%.
+Base size = 4 samples/sec × 3 sec = 12.
+With overhead = 12 × 1.20 = 14.4 → round up to 15.
+Use new CircularBuffer(15).
+Now you’re guaranteed that for any threshold check requiring up to 3 seconds, the buffer has those 3 seconds of data. Anything older than your capacity is overwritten, and the retrieval method only returns data newer than DateTime.UtcNow - 3 seconds.
+
+5. Avoiding Stale Data for Even Longer Windows
+If some rule or check might ask for, say, 10 seconds, but your capacity was only sized for 5 seconds, you’ll lose older data because it gets overwritten. That’s intentional, but it means your 10-second checks might fail. So ensure your capacity covers the largest window you need among your rules.
+
+6. Summary of Best Practices
+Determine your sampling rate and largest needed window upfront.
+Compute buffer capacity = sampling rate × max window (in seconds) × overhead.
+Instantiate the buffer with that capacity.
+Rely on GetValues(duration) to filter and retrieve only the last XXXX ms of interest.
+Avoid reusing the same buffer across tests (in unit tests) if you want each scenario to start fresh.
+By following these steps, you’ll (1) store only as much data as needed, (2) keep memory usage in check, and (3) reliably perform threshold checks on the last XXXX ms of data.
