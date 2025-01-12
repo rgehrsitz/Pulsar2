@@ -39,26 +39,41 @@ namespace Pulsar.Compiler
             s_logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public static void CompileSource(string csharpCode, string outputDllPath, bool debug = false)
+        public static void CompileSource(List<(string fileName, string content)> sourceFiles, string outputDllPath, bool debug = false)
         {
             s_compilationAttempts.Add(1);
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
             try
             {
-                ValidateInputs(csharpCode, outputDllPath);
+                // Validate inputs
+                if (!sourceFiles.Any())
+                {
+                    throw new ArgumentException("Source files cannot be empty", nameof(sourceFiles));
+                }
+                if (string.IsNullOrEmpty(outputDllPath))
+                {
+                    throw new ArgumentException("Output path cannot be empty", nameof(outputDllPath));
+                }
+
                 EnsureOutputDirectory(outputDllPath);
 
-                var syntaxTree = CSharpSyntaxTree.ParseText(csharpCode);
-                ValidateSyntax(syntaxTree);
+                // Parse all source files
+                var syntaxTrees = sourceFiles.Select(file =>
+                {
+                    var tree = CSharpSyntaxTree.ParseText(file.content);
+                    ValidateSyntax(tree);
+                    return tree;
+                }).ToList();
 
-                var compilation = CreateCompilation(syntaxTree, outputDllPath, debug);
+                var compilation = CreateCompilation(syntaxTrees, outputDllPath, debug);
                 EmitAssembly(compilation, outputDllPath, debug);
 
                 sw.Stop();
                 s_compilationDuration.Record(sw.Elapsed.TotalSeconds);
 
-                s_logger.Information("Successfully compiled rules to {OutputPath}", outputDllPath);
+                s_logger.Information("Successfully compiled {FileCount} rule files to {OutputPath}",
+                    sourceFiles.Count, outputDllPath);
             }
             catch (Exception ex)
             {
@@ -101,18 +116,19 @@ namespace Pulsar.Compiler
         }
 
         private static CSharpCompilation CreateCompilation(
-            SyntaxTree syntaxTree,
+            List<SyntaxTree> syntaxTrees,
             string outputDllPath,
             bool debug)
         {
             var assemblyName = Path.GetFileNameWithoutExtension(outputDllPath);
             var references = GetMetadataReferences();
 
-            s_logger.Debug("Creating compilation with {ReferenceCount} references", references.Count);
+            s_logger.Debug("Creating compilation with {ReferenceCount} references and {FileCount} source files",
+                references.Count, syntaxTrees.Count);
 
             return CSharpCompilation.Create(
                 assemblyName,
-                syntaxTrees: new[] { syntaxTree },
+                syntaxTrees: syntaxTrees,
                 references: references,
                 options: new CSharpCompilationOptions(
                     OutputKind.DynamicallyLinkedLibrary,

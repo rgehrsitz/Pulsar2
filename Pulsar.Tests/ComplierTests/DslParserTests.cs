@@ -49,10 +49,13 @@ rules:
             Assert.Equal("SampleRule", rules[0].Name);
 
             var conditions = rules[0].Conditions;
+            Assert.NotNull(conditions);
+            Assert.NotNull(conditions.All);
             Assert.Single(conditions.All);
             Assert.IsType<ComparisonCondition>(conditions.All[0]);
 
             var actions = rules[0].Actions;
+            Assert.NotNull(actions);
             Assert.Single(actions);
             Assert.IsType<SetValueAction>(actions[0]);
         }
@@ -133,6 +136,10 @@ rules:
             Debug.WriteLine($"Rules count: {rules.Count}");
 
             var rule1 = rules[0];
+            Assert.NotNull(rule1.Conditions);
+            Assert.NotNull(rule1.Conditions.All);
+            Assert.NotNull(rule1.Actions);
+
             Debug.WriteLine($"First rule name: {rule1.Name}");
             Debug.WriteLine($"First rule conditions count: {rule1.Conditions.All.Count}");
             Debug.WriteLine($"First rule actions count: {rule1.Actions.Count}");
@@ -169,7 +176,10 @@ rules:
 
             // Assert
             Assert.Single(rules);
+            Assert.NotNull(rules[0].Conditions);
+            Assert.NotNull(rules[0].Conditions.All);
             Assert.Empty(rules[0].Conditions.All);
+            Assert.NotNull(rules[0].Actions);
             Assert.Single(rules[0].Actions);
         }
 
@@ -197,6 +207,10 @@ rules:
 
             // Assert
             Assert.Single(rules);
+            Assert.NotNull(rules[0].Conditions);
+            Assert.NotNull(rules[0].Conditions.All);
+            Assert.Empty(rules[0].Conditions.All);
+            Assert.NotNull(rules[0].Actions);
             Assert.Empty(rules[0].Actions);
         }
 
@@ -221,8 +235,10 @@ rules:
             // Assert
             Assert.Single(rules);
             Assert.NotNull(rules[0].Conditions);
+            Assert.NotNull(rules[0].Conditions.All);
             Assert.Empty(rules[0].Conditions.All);
             Assert.Empty(rules[0].Conditions.Any);
+            Assert.NotNull(rules[0].Actions);
         }
     }
 }

@@ -50,6 +50,34 @@ namespace Pulsar.Tests.CompilerTests
             }
         }
 
+        private string CreateTestRulesDll()
+        {
+            var dllPath = Path.Combine(Path.GetTempPath(), $"TestRules_{Guid.NewGuid()}.dll");
+            var sourceFiles = new List<(string fileName, string content)>
+            {
+                ("CompiledRules.cs", @"
+        using System.Collections.Generic;
+        using Pulsar.Runtime.Buffers;
+
+        public class CompiledRules
+        {
+            public void Evaluate(
+                Dictionary<string, double> inputs,
+                Dictionary<string, double> outputs,
+                RingBufferManager bufferManager)
+            {
+                if (inputs.TryGetValue(""sensor1"", out var value))
+                {
+                    outputs[""output1""] = value * 2;
+                }
+            }
+        }")
+            };
+
+            RoslynCompiler.CompileSource(sourceFiles, dllPath);
+            return dllPath;
+        }
+
         [Fact]
         public void CompileRules_YamlToDll_SuccessfullyCompilesAndRuns()
         {
@@ -78,12 +106,13 @@ rules:
                 var rules = parser.ParseRules(yamlContent, validSensors);
 
                 // Step 2: Generate C# code
-                var csharpCode = CodeGenerator.GenerateCSharp(rules);
+                var generatedFiles = CodeGenerator.GenerateCSharp(rules);
+                var csharpCode = string.Join("\n", generatedFiles.Select(f => f.content));
                 _output.WriteLine("\nGenerated C# Code:");
                 _output.WriteLine(csharpCode);
 
                 // Step 3: Compile to DLL
-                RoslynCompiler.CompileSource(csharpCode, _outputPath);
+                RoslynCompiler.CompileSource(generatedFiles, _outputPath);
                 Assert.True(File.Exists(_outputPath), "DLL file should be created");
 
                 // Step 4: Load and test the compiled rules
@@ -186,8 +215,8 @@ rules:
                 // Parse and compile as before
                 var parser = new DslParser();
                 var rules = parser.ParseRules(yamlContent, validSensors);
-                var csharpCode = CodeGenerator.GenerateCSharp(rules);
-                RoslynCompiler.CompileSource(csharpCode, _outputPath);
+                var generatedFiles = CodeGenerator.GenerateCSharp(rules);
+                RoslynCompiler.CompileSource(generatedFiles, _outputPath);
 
                 // Load and test
                 var assembly = Assembly.LoadFrom(_outputPath);
@@ -275,11 +304,12 @@ rules:
                 var sortedRules = analyzer.AnalyzeDependencies(rules);
                 _output.WriteLine("Dependencies analyzed");
 
-                var code = CodeGenerator.GenerateCSharp(sortedRules);
+                var generatedFiles = CodeGenerator.GenerateCSharp(sortedRules);
+                var code = string.Join("\n", generatedFiles.Select(f => f.content));
                 _output.WriteLine("\nGenerated C# Code:");
                 _output.WriteLine(code);
 
-                RoslynCompiler.CompileSource(code, _outputPath);
+                RoslynCompiler.CompileSource(generatedFiles, _outputPath);
                 _output.WriteLine("Code compiled successfully");
 
                 // Test the compiled rules
@@ -369,8 +399,8 @@ rules:
     actions:
       - set_value:
           key: 'temp_alert'
-          value: 1
-";
+          value: 1";
+
             var validSensors = new List<string>
     {
         "raw_temp", "temp_c", "previous_temp_c",
@@ -406,16 +436,19 @@ rules:
                     "Rate calculation must happen before alert check"
                 );
 
-                var code = CodeGenerator.GenerateCSharp(sortedRules);
+                var generatedFiles = CodeGenerator.GenerateCSharp(sortedRules);
+                var code = string.Join("\n", generatedFiles.Select(f => f.content));
                 _output.WriteLine("\nGenerated Code:");
                 _output.WriteLine(code);
 
-                RoslynCompiler.CompileSource(code, _outputPath);
+                RoslynCompiler.CompileSource(generatedFiles, _outputPath);
 
                 // Test execution
                 var assembly = Assembly.LoadFrom(_outputPath);
-                var rulesType = assembly.GetType("CompiledRules");
-                var instance = Activator.CreateInstance(rulesType);
+                var rulesType = assembly.GetType("CompiledRules") 
+                    ?? throw new InvalidOperationException("CompiledRules type not found in assembly");
+                var instance = Activator.CreateInstance(rulesType)
+                    ?? throw new InvalidOperationException("Failed to create CompiledRules instance");
 
                 var inputs = new Dictionary<string, double>();
                 var outputs = new Dictionary<string, double>();

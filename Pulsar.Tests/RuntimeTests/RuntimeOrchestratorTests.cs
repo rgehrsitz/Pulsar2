@@ -73,7 +73,9 @@ public class RuntimeOrchestratorTests : IDisposable
     private string CreateTestRulesDll()
     {
         var dllPath = Path.Combine(Path.GetTempPath(), $"TestRules_{Guid.NewGuid()}.dll");
-        var code = @"
+        var sourceFiles = new List<(string fileName, string content)>
+        {
+            ("CompiledRules.cs", @"
         using System.Collections.Generic;
         using Pulsar.Runtime.Buffers;
 
@@ -89,9 +91,10 @@ public class RuntimeOrchestratorTests : IDisposable
                     outputs[""output1""] = value * 2;
                 }
             }
-        }";
+        }")
+        };
 
-        Pulsar.Compiler.RoslynCompiler.CompileSource(code, dllPath);
+        Pulsar.Compiler.RoslynCompiler.CompileSource(sourceFiles, dllPath);
         return dllPath;
     }
 

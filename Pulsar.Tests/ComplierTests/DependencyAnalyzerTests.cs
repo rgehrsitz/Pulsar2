@@ -61,14 +61,14 @@ namespace Pulsar.Tests.CompilerTests
                     "  Inputs: "
                         + string.Join(
                             ", ",
-                            rule.Conditions.All.OfType<ComparisonCondition>().Select(c => c.Sensor)
+                            rule.Conditions?.All?.OfType<ComparisonCondition>().Select(c => c.Sensor) ?? Array.Empty<string>()
                         )
                 );
                 Debug.WriteLine(
                     "  Outputs: "
                         + string.Join(
                             ", ",
-                            rule.Actions.OfType<SetValueAction>().Select(a => a.Key)
+                            rule.Actions?.OfType<SetValueAction>().Select(a => a.Key) ?? Array.Empty<string>()
                         )
                 );
             }

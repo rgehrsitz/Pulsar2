@@ -18,9 +18,15 @@ namespace Pulsar.Compiler.Generation
     {
         private static Dictionary<string, RuleDefinition> _outputs = new();
 
-        public static string GenerateCSharp(List<RuleDefinition> sortedRules)
+        // Modified signature to return multiple files
+        public static List<(string fileName, string content)> GenerateCSharp(
+            List<RuleDefinition> sortedRules,
+            int rulesPerGroup = 50)  // New parameter
         {
-            // Store outputs from rules
+            ArgumentNullException.ThrowIfNull(sortedRules, nameof(sortedRules));
+            var result = new List<(string fileName, string content)>();
+
+            // Store outputs from rules (keeping existing logic)
             _outputs.Clear();
             foreach (var rule in sortedRules)
             {
@@ -29,51 +35,95 @@ namespace Pulsar.Compiler.Generation
                     _outputs[action.Key] = rule;
                 }
             }
-            ArgumentNullException.ThrowIfNull(sortedRules, nameof(sortedRules));
 
-            var codeBuilder = new StringBuilder();
-            codeBuilder.AppendLine("using System;");
-            codeBuilder.AppendLine("using System.Collections.Generic;");
-            codeBuilder.AppendLine("using Pulsar.Runtime.Buffers;");
-            codeBuilder.AppendLine("using Pulsar;");
-            codeBuilder.AppendLine();
-            codeBuilder.AppendLine("public class CompiledRules");
-            codeBuilder.AppendLine("{");
-
-            // Generate main evaluation method
-            codeBuilder.AppendLine(
-                "    public void Evaluate(Dictionary<string, double> inputs, " +
-                "Dictionary<string, double> outputs, RingBufferManager bufferManager)");
-            codeBuilder.AppendLine("    {");
-
-            // Get distinct layers
+            // Get distinct layers (keeping existing logic)
             var rulesByLayer = GetRulesByLayer(sortedRules);
             var layers = rulesByLayer.Keys.OrderBy(l => l).ToList();
+
+            // Split rules into groups while respecting layers
+            var currentGroup = 1;
+            var currentBuilder = new StringBuilder();
+            int rulesInCurrentGroup = 0;
+
+            // Begin first group file
+            WriteFileHeader(currentBuilder);
+
+            foreach (var layer in layers)
+            {
+                var layerRules = rulesByLayer[layer];
+
+                // If adding this layer's rules would exceed the group size, start new group
+                if (rulesInCurrentGroup + layerRules.Count > rulesPerGroup && rulesInCurrentGroup > 0)
+                {
+                    WriteFileFooter(currentBuilder);
+                    result.Add(($"RuleGroup_{currentGroup}.cs", currentBuilder.ToString()));
+                    currentGroup++;
+                    currentBuilder = new StringBuilder();
+                    WriteFileHeader(currentBuilder);
+                    rulesInCurrentGroup = 0;
+                }
+
+                GenerateLayerMethod(currentBuilder, layer, layerRules);
+                rulesInCurrentGroup += layerRules.Count;
+            }
+
+            // Add final group
+            if (rulesInCurrentGroup > 0)
+            {
+                WriteFileFooter(currentBuilder);
+                result.Add(($"RuleGroup_{currentGroup}.cs", currentBuilder.ToString()));
+            }
+
+            // Generate coordinator file
+            result.Add(GenerateCoordinatorFile(layers, currentGroup));
+
+            return result;
+        }
+
+        private static void WriteFileHeader(StringBuilder builder)
+        {
+            builder.AppendLine("using System;");
+            builder.AppendLine("using System.Collections.Generic;");
+            builder.AppendLine("using Pulsar.Runtime.Buffers;");
+            builder.AppendLine("using Pulsar;");
+            builder.AppendLine();
+            builder.AppendLine("namespace Pulsar.Generated");
+            builder.AppendLine("{");
+            builder.AppendLine("    public partial class CompiledRules");
+            builder.AppendLine("    {");
+        }
+
+        private static void WriteFileFooter(StringBuilder builder)
+        {
+            builder.AppendLine("    }");
+            builder.AppendLine("}");
+        }
+
+        private static (string fileName, string content) GenerateCoordinatorFile(
+            List<int> layers,
+            int groupCount)
+        {
+            var builder = new StringBuilder();
+            WriteFileHeader(builder);
+
+            // Generate main evaluation method
+            builder.AppendLine(
+                "        public void Evaluate(Dictionary<string, double> inputs, " +
+                "Dictionary<string, double> outputs, RingBufferManager bufferManager)");
+            builder.AppendLine("        {");
 
             // Call each layer's evaluation method in order
             foreach (var layer in layers)
             {
-                codeBuilder.AppendLine($"        EvaluateLayer{layer}(inputs, outputs, bufferManager);");
-            }
-            codeBuilder.AppendLine("    }");
-            codeBuilder.AppendLine();
-
-            // Generate individual layer methods
-            foreach (var layer in layers)
-            {
-                var layerRules = rulesByLayer[layer];
-                GenerateLayerMethod(codeBuilder, layer, layerRules);
+                builder.AppendLine($"            EvaluateLayer{layer}(inputs, outputs, bufferManager);");
             }
 
-            codeBuilder.AppendLine("}");
+            builder.AppendLine("        }");
 
-            var finalCode = codeBuilder.ToString();
-            Debug.WriteLine("\n==== COMPLETE GENERATED CODE START ====");
-            Debug.WriteLine(finalCode);
-            Debug.WriteLine("==== COMPLETE GENERATED CODE END ====");
-
-            return finalCode;
+            WriteFileFooter(builder);
+            return ("RuleCoordinator.cs", builder.ToString());
         }
+
 
         private static Dictionary<int, List<RuleDefinition>> GetRulesByLayer(
             List<RuleDefinition> sortedRules
@@ -172,8 +222,7 @@ namespace Pulsar.Compiler.Generation
         private static void GenerateLayerMethod(
             StringBuilder builder,
             int layer,
-            List<RuleDefinition> rules
-        )
+            List<RuleDefinition> rules)
         {
             builder.AppendLine(
                 $"    private void EvaluateLayer{layer}(Dictionary<string, double> inputs, " +
@@ -194,7 +243,13 @@ namespace Pulsar.Compiler.Generation
 
             foreach (var rule in rules)
             {
+                // Add source tracing comment
                 builder.AppendLine($"        // Rule: {rule.Name}");
+                if (!string.IsNullOrEmpty(rule.Description))
+                {
+                    builder.AppendLine($"        // Description: {rule.Description}");
+                }
+
                 builder.AppendLine(
                     $"        System.Diagnostics.Debug.WriteLine(\"Evaluating rule: {rule.Name}\");"
                 );
@@ -204,7 +259,7 @@ namespace Pulsar.Compiler.Generation
 
                 if (!string.IsNullOrEmpty(condition))
                 {
-                    // For the debug line, escape the condition string properly
+                    // Rest of the existing condition and action generation code remains the same
                     var escapedCondition = condition.Replace("\"", "\\\"");
                     builder.AppendLine(
                         $"        System.Diagnostics.Debug.WriteLine(\"Checking condition: {escapedCondition}\");"
