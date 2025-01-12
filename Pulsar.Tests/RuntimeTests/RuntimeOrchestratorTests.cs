@@ -10,6 +10,7 @@ using Pulsar.Runtime.Services;
 using StackExchange.Redis;
 using Serilog;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Pulsar.Tests.Runtime;
 
@@ -20,9 +21,11 @@ public class RuntimeOrchestratorTests : IDisposable
     private readonly string _testDllPath;
     private readonly RuntimeOrchestrator _orchestrator;
     private readonly string[] _testSensors = new[] { "sensor1", "sensor2" };
+    private readonly ITestOutputHelper _output;
 
-    public RuntimeOrchestratorTests()
+    public RuntimeOrchestratorTests(ITestOutputHelper output)
     {
+        _output = output; // Initialize the output helper
         _redisMock = new Mock<IRedisService>();
 
         // Create logger mock for Serilog's fluent interface.
@@ -105,10 +108,11 @@ public class RuntimeOrchestratorTests : IDisposable
     public async Task ExecuteCycleAsync_ProcessesInputsAndOutputsCorrectly()
     {
         // Arrange
-        var inputs = new Dictionary<string, double>
+        var timestamp = DateTime.UtcNow;
+        var inputs = new Dictionary<string, (double, DateTime)>
         {
-            { "sensor1", 42.0 },
-            { "sensor2", 24.0 }
+            { "sensor1", (42.0, timestamp) },
+            { "sensor2", (24.0, timestamp) }
         };
 
         _redisMock.Setup(x => x.GetSensorValuesAsync(It.IsAny<IEnumerable<string>>()))
@@ -140,29 +144,54 @@ public class RuntimeOrchestratorTests : IDisposable
     public async Task ExecuteCycleAsync_HandlesRedisErrors()
     {
         // Arrange
+        var testException = new RedisConnectionException(ConnectionFailureType.UnableToConnect, "Test error");
+
+        // Capture all Error method calls
+        var errorCalls = new List<(Exception Ex, string Message)>();
+
+        _loggerMock
+            .Setup(x => x.Error(
+                It.IsAny<Exception>(),
+                It.Is<string>(s => s.Contains("Error during execution cycle"))
+            ))
+            .Callback<Exception, string>((ex, msg) =>
+            {
+                errorCalls.Add((ex, msg));
+                _output.WriteLine($"Error Called: Ex={ex}, Msg={msg}");
+            })
+            .Verifiable();
+
         _redisMock.Setup(x => x.GetSensorValuesAsync(It.IsAny<IEnumerable<string>>()))
-            .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.UnableToConnect, "Test error"));
+            .ThrowsAsync(testException);
 
         // Act & Assert
         _orchestrator.LoadRules(_testDllPath);
-        await Assert.ThrowsAsync<RedisConnectionException>(
+        var ex = await Assert.ThrowsAsync<RedisConnectionException>(
             () => _orchestrator.ExecuteCycleAsync());
 
+        // Verify error logging
         _loggerMock.Verify(
             x => x.Error(
-                It.IsAny<Exception>(),
+                testException,
                 It.Is<string>(s => s.Contains("Error during execution cycle"))),
-            Times.Once);
+            Times.Once,
+            "Error logging was not called as expected");
+
+        // Additional verification
+        Assert.Single(errorCalls);
+        var (capturedEx, capturedMsg) = errorCalls[0];
+        Assert.Equal(testException, capturedEx);
+        Assert.Contains("Error during execution cycle", capturedMsg);
     }
 
     [Fact]
     public async Task StartStop_WorksCorrectly()
     {
         // Arrange
-        var inputs = new Dictionary<string, double>
+        var inputs = new Dictionary<string, (double, DateTime)>
         {
-            { "sensor1", 42.0 },
-            { "sensor2", 24.0 }
+            { "sensor1", (42.0, DateTime.UtcNow) },
+            { "sensor2", (24.0, DateTime.UtcNow) }
         };
 
         _redisMock.Setup(x => x.GetSensorValuesAsync(It.IsAny<IEnumerable<string>>()))
@@ -185,10 +214,10 @@ public class RuntimeOrchestratorTests : IDisposable
     public async Task ExecuteCycleAsync_LogsWarningOnSlowCycle()
     {
         // Arrange
-        var inputs = new Dictionary<string, double>
+        var inputs = new Dictionary<string, (double, DateTime)>
         {
-            { "sensor1", 42.0 },
-            { "sensor2", 24.0 }
+            { "sensor1", (42.0, DateTime.UtcNow) },
+            { "sensor2", (24.0, DateTime.UtcNow) }
         };
 
         // Simulate slow Redis operation
@@ -241,8 +270,6 @@ public class RuntimeOrchestratorTests : IDisposable
             try { File.Delete(invalidDllPath); } catch { /* Ignore cleanup */ }
         }
     }
-
-
 
     [Fact]
     public async Task Dispose_CleansUpResourcesCorrectly()

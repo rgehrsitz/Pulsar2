@@ -61,7 +61,8 @@ namespace Pulsar.Tests.IntegrationTests
 
             // Assert
             Assert.Single(result);
-            Assert.Equal(value, result[key]);
+            Assert.Equal(value, result[key].Item1);
+            Assert.True((DateTime.UtcNow - result[key].Item2).TotalSeconds < 5);
         }
 
         [Fact]
@@ -84,7 +85,8 @@ namespace Pulsar.Tests.IntegrationTests
             foreach (var kvp in testData)
             {
                 Assert.True(results.ContainsKey(kvp.Key));
-                Assert.Equal(kvp.Value, results[kvp.Key]);
+                Assert.Equal(kvp.Value, results[kvp.Key].Item1);
+                Assert.True((DateTime.UtcNow - results[kvp.Key].Item2).TotalSeconds < 5);
             }
         }
 
@@ -115,7 +117,8 @@ namespace Pulsar.Tests.IntegrationTests
             foreach (var kvp in testData)
             {
                 Assert.True(results.ContainsKey(kvp.Key));
-                Assert.Equal(kvp.Value, results[kvp.Key]);
+                Assert.Equal(kvp.Value, results[kvp.Key].Item1);
+                Assert.True((DateTime.UtcNow - results[kvp.Key].Item2).TotalSeconds < 5);
             }
         }
 
@@ -164,7 +167,8 @@ namespace Pulsar.Tests.IntegrationTests
             foreach (var kvp in testData)
             {
                 Assert.True(results.ContainsKey(kvp.Key));
-                Assert.Equal(kvp.Value, results[kvp.Key], 10); // precision to 10 decimal places
+                Assert.Equal(kvp.Value, results[kvp.Key].Item1, 10); // precision to 10 decimal places
+                Assert.True((DateTime.UtcNow - results[kvp.Key].Item2).TotalSeconds < 5);
             }
         }
 
@@ -188,7 +192,8 @@ namespace Pulsar.Tests.IntegrationTests
                 var result = await _redisService.GetSensorValuesAsync(new[] { key });
 
                 Assert.True(result.ContainsKey(key));
-                Assert.Equal(i, result[key]);
+                Assert.Equal(i, result[key].Item1);
+                Assert.True((DateTime.UtcNow - result[key].Item2).TotalSeconds < 5);
             }
         }
 

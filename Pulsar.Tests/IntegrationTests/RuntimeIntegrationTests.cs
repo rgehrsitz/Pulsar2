@@ -113,7 +113,7 @@ rules:
                 results = await _redis.GetSensorValuesAsync(
                     new[] { $"{TestKeyPrefix}temp_alert" });
                 Assert.True(results.ContainsKey($"{TestKeyPrefix}temp_alert"));
-                Assert.Equal(1, results[$"{TestKeyPrefix}temp_alert"]);
+                Assert.Equal(1, results[$"{TestKeyPrefix}temp_alert"].Item1);
             }
             finally
             {
@@ -170,6 +170,7 @@ rules:
                 results = await _redis.GetSensorValuesAsync(
                     new[] { $"{TestKeyPrefix}sustained_alert" });
                 Assert.True(results.ContainsKey($"{TestKeyPrefix}sustained_alert"));
+                Assert.Equal(1, results[$"{TestKeyPrefix}sustained_alert"].Item1);
             }
             finally
             {
@@ -265,9 +266,9 @@ rules:
                 Assert.True(results.ContainsKey($"{TestKeyPrefix}comfort_alert"));
 
                 // Verify values
-                Assert.Equal(30.0, results[$"{TestKeyPrefix}temp_c"], 1); // 1 decimal precision
-                Assert.Equal(1, results[$"{TestKeyPrefix}humid_alert"]);
-                Assert.Equal(1, results[$"{TestKeyPrefix}comfort_alert"]);
+                Assert.Equal(30.0, results[$"{TestKeyPrefix}temp_c"].Item1, 1); // 1 decimal precision
+                Assert.Equal(1, results[$"{TestKeyPrefix}humid_alert"].Item1);
+                Assert.Equal(1, results[$"{TestKeyPrefix}comfort_alert"].Item1);
             }
             finally
             {
@@ -331,7 +332,7 @@ rules:
                 var results = await _redis.GetSensorValuesAsync(outputKeys);
 
                 Assert.Equal(100, results.Count);
-                Assert.All(results.Values, value => Assert.Equal(150.0, value));
+                Assert.All(results.Values, value => Assert.Equal(150.0, value.Item1));
 
                 _output.WriteLine($"Processed 100 rules over {sw.ElapsedMilliseconds}ms");
             }

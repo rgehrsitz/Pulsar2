@@ -9,7 +9,7 @@ namespace Pulsar.Runtime.Services;
 
 public interface IRedisService
 {
-    Task<Dictionary<string, double>> GetSensorValuesAsync(IEnumerable<string> sensorKeys);
+    Task<Dictionary<string, (double Value, DateTime Timestamp)>> GetSensorValuesAsync(IEnumerable<string> sensorKeys);
     Task SetOutputValuesAsync(Dictionary<string, double> outputs);
 }
 
@@ -48,29 +48,45 @@ public class RedisService : IRedisService, IDisposable
         }
     }
 
-    public async Task<Dictionary<string, double>> GetSensorValuesAsync(IEnumerable<string> sensorKeys)
+    public async Task<Dictionary<string, (double Value, DateTime Timestamp)>> GetSensorValuesAsync(IEnumerable<string> sensorKeys)
     {
-        var result = new Dictionary<string, double>();
+        var result = new Dictionary<string, (double Value, DateTime Timestamp)>();
         var keyArray = sensorKeys.ToArray();
 
         try
         {
-            await _connectionLock.WaitAsync();
+            await _connectionLock.WaitAsync(); // Re-added connection lock
 
-            // Use MGET for bulk retrieval
-            var values = await _db.StringGetAsync(keyArray.Select(k => new RedisKey(k)).ToArray());
+            var batch = _db.CreateBatch();
+            var tasks = new List<Task<HashEntry[]>>();
 
-            // Process results
+            foreach (var key in keyArray)
+            {
+                tasks.Add(batch.HashGetAllAsync(key));
+            }
+
+            batch.Execute();
+            await Task.WhenAll(tasks);
+
             for (int i = 0; i < keyArray.Length; i++)
             {
-                var value = values[i];
-                if (value.HasValue && double.TryParse(value.ToString(), out double numValue))
+                var hashValues = tasks[i].Result;
+
+                var valueEntry = hashValues.FirstOrDefault(he => he.Name == "value");
+                var timestampEntry = hashValues.FirstOrDefault(he => he.Name == "timestamp");
+
+                if (valueEntry.Value.HasValue && timestampEntry.Value.HasValue)
                 {
-                    result[keyArray[i]] = numValue;
-                }
-                else
-                {
-                    LogThrottledWarning($"Missing or invalid value for sensor {keyArray[i]}");
+                    if (double.TryParse(valueEntry.Value.ToString(), out double value) &&
+                        long.TryParse(timestampEntry.Value.ToString(), out long ticksValue))
+                    {
+                        DateTime timestamp = new DateTime(ticksValue, DateTimeKind.Utc);
+                        result[keyArray[i]] = (value, timestamp);
+                    }
+                    else
+                    {
+                        LogThrottledWarning($"Invalid value or timestamp format for sensor {keyArray[i]}");
+                    }
                 }
             }
         }
@@ -81,7 +97,7 @@ public class RedisService : IRedisService, IDisposable
         }
         finally
         {
-            _connectionLock.Release();
+            _connectionLock.Release(); // Ensure lock is always released
         }
 
         return result;
@@ -95,14 +111,21 @@ public class RedisService : IRedisService, IDisposable
         {
             await _connectionLock.WaitAsync();
 
-            // Prepare key-value pairs for MSET
-            var keyValuePairs = outputs
-                .Select(kvp => new KeyValuePair<RedisKey, RedisValue>(
-                    kvp.Key,
-                    kvp.Value.ToString("G17")))
-                .ToArray();
+            // Use Redis batch operation for better performance
+            var batch = _db.CreateBatch();
+            var tasks = new List<Task>();
+            var timestamp = DateTime.UtcNow.Ticks;
 
-            await _db.StringSetAsync(keyValuePairs);
+            foreach (var kvp in outputs)
+            {
+                tasks.Add(batch.HashSetAsync(kvp.Key, new HashEntry[] {
+                    new HashEntry("value", kvp.Value.ToString("G17")),
+                    new HashEntry("timestamp", timestamp)
+                }));
+            }
+
+            batch.Execute();
+            await Task.WhenAll(tasks);
         }
         catch (Exception ex)
         {
@@ -135,4 +158,3 @@ public class RedisService : IRedisService, IDisposable
         _redis?.Dispose();
     }
 }
-

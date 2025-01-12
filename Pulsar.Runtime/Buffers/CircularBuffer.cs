@@ -304,14 +304,18 @@ public class RingBufferManager
 
     private readonly IDateTimeProvider _dateTimeProvider;
 
+    public void UpdateBuffer(string sensor, double value, DateTime timestamp)
+    {
+        var buffer = _buffers.GetOrAdd(sensor, _ => new CircularBuffer(_capacity, _dateTimeProvider));
+        buffer.Add(value, timestamp);
+    }
 
     public void UpdateBuffers(Dictionary<string, double> currentValues)
     {
         var timestamp = _dateTimeProvider.UtcNow;
         foreach (var (sensor, value) in currentValues)
         {
-            var buffer = _buffers.GetOrAdd(sensor, _ => new CircularBuffer(_capacity, _dateTimeProvider));
-            buffer.Add(value, timestamp);
+            UpdateBuffer(sensor, value, timestamp);
         }
     }
 
