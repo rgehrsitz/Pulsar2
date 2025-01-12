@@ -1,0 +1,64 @@
+Pulsar System Refactoring Plan
+Overview
+The Pulsar system currently uses runtime DLL generation and dynamic loading to execute rules. While functional, this approach presents challenges for debugging, traceability, and AOT compilation. This refactoring aims to transform Pulsar into a fully AOT-compatible system with improved debugging capabilities and maintainability.
+Goals
+
+AOT Compatibility: Create a single, self-contained executable that can be compiled using AOT compilation
+Enhanced Debugging: Improve traceability between source rules and runtime behavior
+Build-time Rule Processing: Move all rule processing and code generation to build time
+Scalability: Support hundreds of rules while maintaining code manageability
+Maintainability: Improve code organization and reduce complexity
+
+Key Changes
+
+Eliminate runtime DLL generation and dynamic loading
+Generate C# source files during build process
+Implement source rule tracking via comments
+Support rule file splitting for large rulesets
+Remove reflection and dynamic code
+
+Implementation Phases
+
+Phase 1: Code Generation Updates
+1. Modify CodeGenerator.cs to:
+   - Generate partial class files with proper namespace
+   - Include source rule references in comments
+   - Support file splitting based on configurable thresholds
+   - Remove dynamic/reflection code
+   - Create manifest tracking generated files
+
+Phase 2: Build Process Integration
+1. Create build-time orchestrator tool that:
+   - Takes input directory of YAML files
+   - Validates and processes all rules
+   - Manages file splitting/grouping
+   - Generates .cs files into project
+2. Add MSBuild integration
+   - Pre-build step to run orchestrator
+   - Configuration options for thresholds/paths
+
+Phase 3: Runtime Updates
+1. Modify RuntimeOrchestrator.cs to:
+   - Remove dynamic loading
+   - Use direct method calls
+   - Update buffer management
+   - Enhance error handling
+2. Update test frameworks accordingly
+
+Phase 4: AOT Compatibility
+1. Audit and remove:
+   - Dynamic code generation
+   - Runtime reflection
+   - Dynamic loading
+2. Add AOT compatibility attributes
+3. Test AOT compilation
+
+Phase 5: Testing & Documentation
+1. Create integration tests covering:
+   - Large rule sets
+   - File splitting
+   - Build process
+2. Update documentation for:
+   - Build process
+   - Rule organization
+   - Debugging
