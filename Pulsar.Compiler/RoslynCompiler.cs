@@ -13,6 +13,7 @@ using Serilog;
 using Serilog.Core;
 using Serilog.Events;
 using System.Diagnostics.Metrics;
+using Pulsar.Compiler.Models;
 
 namespace Pulsar.Compiler
 {
@@ -39,7 +40,7 @@ namespace Pulsar.Compiler
             s_logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public static void CompileSource(List<(string fileName, string content)> sourceFiles, string outputDllPath, bool debug = false)
+        public static void CompileSource(List<GeneratedFileInfo> sourceFiles, string outputDllPath, bool debug = false)
         {
             s_compilationAttempts.Add(1);
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -49,21 +50,38 @@ namespace Pulsar.Compiler
                 // Validate inputs
                 if (!sourceFiles.Any())
                 {
-                    throw new ArgumentException("Source files cannot be empty", nameof(sourceFiles));
-                }
-                if (string.IsNullOrEmpty(outputDllPath))
-                {
-                    throw new ArgumentException("Output path cannot be empty", nameof(outputDllPath));
+                    throw new ArgumentException("No source files provided", nameof(sourceFiles));
                 }
 
+                if (string.IsNullOrWhiteSpace(outputDllPath))
+                {
+                    throw new ArgumentException("Output DLL path not specified", nameof(outputDllPath));
+                }
+
+                // Ensure output directory exists
                 EnsureOutputDirectory(outputDllPath);
 
-                // Parse all source files
+                // Create syntax trees from source files
                 var syntaxTrees = sourceFiles.Select(file =>
                 {
-                    var tree = CSharpSyntaxTree.ParseText(file.content);
-                    ValidateSyntax(tree);
-                    return tree;
+                    try
+                    {
+                        var tree = CSharpSyntaxTree.ParseText(
+                            file.Content,
+                            path: file.FileName,
+                            options: debug ? new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.Parse) 
+                                        : CSharpParseOptions.Default
+                        );
+
+                        // Validate syntax
+                        ValidateSyntax(tree, file.FileName);
+                        return tree;
+                    }
+                    catch (Exception ex)
+                    {
+                        s_logger.Error(ex, "Error parsing source file {FileName}", file.FileName);
+                        throw;
+                    }
                 }).ToList();
 
                 var compilation = CreateCompilation(syntaxTrees, outputDllPath, debug);
@@ -101,7 +119,7 @@ namespace Pulsar.Compiler
             }
         }
 
-        private static void ValidateSyntax(SyntaxTree syntaxTree)
+        private static void ValidateSyntax(SyntaxTree syntaxTree, string fileName)
         {
             var diagnostics = syntaxTree.GetDiagnostics()
                 .Where(d => d.Severity == DiagnosticSeverity.Error);
@@ -110,7 +128,7 @@ namespace Pulsar.Compiler
             {
                 var errors = diagnostics.Select(FormatDiagnostic);
                 throw new CompilationException(
-                    $"Syntax validation failed:\n{string.Join("\n", errors)}"
+                    $"Syntax validation failed for {fileName}:\n{string.Join("\n", errors)}"
                 );
             }
         }

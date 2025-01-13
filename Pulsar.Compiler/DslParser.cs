@@ -5,30 +5,70 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using Pulsar.Compiler.Models;
+using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
+using YamlDotNet.Serialization.NodeDeserializers;
+using Pulsar.Compiler.Models;
 
 namespace Pulsar.Compiler.Parsers
 {
     public class DslParser
     {
         private readonly IDeserializer _deserializer;
+        private string _currentFile = string.Empty;
 
         public DslParser()
         {
             _deserializer = new DeserializerBuilder()
-                .WithNamingConvention(UnderscoredNamingConvention.Instance) // Change this
+                .WithNamingConvention(UnderscoredNamingConvention.Instance)
+                .WithNodeDeserializer(new YamlNodeDeserializer())
                 .IgnoreUnmatchedProperties()
                 .Build();
         }
 
-        public List<RuleDefinition> ParseRules(string yamlContent, List<string> validSensors)
+        private class YamlNodeDeserializer : INodeDeserializer
         {
-            var root = _deserializer.Deserialize<RuleRoot>(yamlContent);
-            Debug.WriteLine($"\nParsed YAML root: Rules count = {root.Rules.Count}");
+            public bool Deserialize(
+                IParser parser,
+                Type expectedType,
+                Func<IParser, Type, object?> nestedObjectDeserializer,
+                out object? value,
+                ObjectDeserializer rootDeserializer)
+            {
+                value = null;
 
-            if (root.Rules.Any())
+                // Use the default deserializer for most types
+                if (expectedType != typeof(Rule))
+                {
+                    return false;
+                }
+
+                // For Rule type, use the nested deserializer since we need parser context
+                value = nestedObjectDeserializer(parser, expectedType);
+
+                if (value is Rule rule)
+                {
+                    // Mark is a struct, so we need to handle the nullable Mark? properly
+                    if (parser.Current?.Start is Mark start)
+                    {
+                        rule.LineNumber = (int)start.Line;  // Access Line as a property
+                        rule.OriginalText = start.ToString();
+                    }
+                    return true;
+                }
+
+                return false;
+            }
+        }
+
+        public List<RuleDefinition> ParseRules(string yamlContent, List<string> validSensors, string fileName = "")
+        {
+            _currentFile = fileName;
+            var root = _deserializer.Deserialize<RuleRoot>(yamlContent);
+            Debug.WriteLine($"\nParsed YAML root: Rules count = {root?.Rules?.Count ?? 0}");
+
+            if (root?.Rules?.Any() == true)
             {
                 var firstRule = root.Rules.First();
                 Debug.WriteLine(
@@ -37,6 +77,11 @@ namespace Pulsar.Compiler.Parsers
             }
 
             var ruleDefinitions = new List<RuleDefinition>();
+
+            if (root?.Rules == null)
+            {
+                return ruleDefinitions;
+            }
 
             foreach (var rule in root.Rules)
             {
@@ -50,7 +95,7 @@ namespace Pulsar.Compiler.Parsers
                 {
                     foreach (var action in rule.Actions)
                     {
-                        if (action.SetValue != null)
+                        if (action?.SetValue != null)
                         {
                             Debug.WriteLine(
                                 $"SetValue action found - Key: {action.SetValue.Key}, Value: {action.SetValue.Value}, Expression: {action.SetValue.ValueExpression}"
@@ -63,21 +108,16 @@ namespace Pulsar.Compiler.Parsers
                 var ruleDefinition = new RuleDefinition
                 {
                     Name = rule.Name,
-                    Description = rule.Description, // Keeping description from original
+                    Description = rule.Description,
                     Conditions = ConvertConditions(rule.Conditions),
                     Actions = ConvertActions(rule.Actions ?? new List<ActionListItem>()),
-                };
-
-                // Debug converted actions
-                foreach (var action in ruleDefinition.Actions)
-                {
-                    if (action is SetValueAction setValueAction)
+                    SourceInfo = new SourceInfo
                     {
-                        Debug.WriteLine(
-                            $"Converted action - Key: {setValueAction.Key}, Value: {setValueAction.Value}, Expression: {setValueAction.ValueExpression}"
-                        );
+                        FileName = _currentFile,
+                        LineNumber = rule.LineNumber,
+                        OriginalText = rule.OriginalText ?? string.Empty
                     }
-                }
+                };
 
                 ruleDefinitions.Add(ruleDefinition);
             }
@@ -149,7 +189,7 @@ namespace Pulsar.Compiler.Parsers
                 foreach (var actionItem in rule.Actions)
                 {
                     Debug.WriteLine("Processing action:");
-                    if (actionItem.SetValue != null)
+                    if (actionItem?.SetValue != null)
                     {
                         Debug.WriteLine($"Adding SetValue key: {actionItem.SetValue.Key}");
                         allSensors.Add(actionItem.SetValue.Key);
@@ -273,7 +313,7 @@ namespace Pulsar.Compiler.Parsers
                 {
                     Debug.WriteLine($"Processing action item");
 
-                    if (actionItem.SetValue != null)
+                    if (actionItem?.SetValue != null)
                     {
                         Debug.WriteLine($"Found SetValue action");
                         var setValueAction = new SetValueAction
@@ -318,12 +358,13 @@ namespace Pulsar.Compiler.Parsers
     public class Rule
     {
         public string Name { get; set; } = string.Empty;
-
-        [YamlMember(Alias = "description")]
         public string? Description { get; set; }
+        public ConditionGroupYaml? Conditions { get; set; }
+        public List<ActionListItem>? Actions { get; set; }
 
-        public ConditionGroupYaml Conditions { get; set; } = new();
-        public List<ActionListItem> Actions { get; set; } = new();
+        // Line tracking properties
+        public int LineNumber { get; set; }
+        public string? OriginalText { get; set; }
     }
 
     public class ActionListItem

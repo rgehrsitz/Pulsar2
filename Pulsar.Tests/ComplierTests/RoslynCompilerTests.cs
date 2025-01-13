@@ -3,7 +3,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
+using Pulsar.Compiler.Models;
 using Xunit;
 using Xunit.Abstractions;
 using Serilog;
@@ -89,6 +91,20 @@ namespace Pulsar.Tests.CompilerTests
             }
         }
 
+        private static List<GeneratedFileInfo> CreateSourceFiles(string code)
+        {
+            return new List<GeneratedFileInfo>
+            {
+                new GeneratedFileInfo
+                {
+                    FileName = "CompiledRules.cs",
+                    FilePath = "Generated/CompiledRules.cs",
+                    Content = code,
+                    Namespace = "Pulsar.Generated"
+                }
+            };
+        }
+
         [Fact]
         public void CompileSource_ValidCode_CreatesAssembly()
         {
@@ -110,11 +126,10 @@ namespace Pulsar.Tests.CompilerTests
                 }
             }";
 
+            var sourceFiles = CreateSourceFiles(validCode);
+
             // Act
-            RoslynCompiler.CompileSource(new List<(string, string)>
-{
-    ("TestClass.cs", validCode)
-}, _testOutputPath);
+            RoslynCompiler.CompileSource(sourceFiles, _testOutputPath);
 
             // Assert
             Assert.True(File.Exists(_testOutputPath), "The output DLL should be created.");
@@ -153,12 +168,11 @@ namespace Pulsar.Tests.CompilerTests
             }
         }";
 
+            var sourceFiles = CreateSourceFiles(invalidCode);
+
             // Act & Assert
             var ex = Assert.Throws<CompilationException>(
-                () => RoslynCompiler.CompileSource(new List<(string, string)>
-{
-    ("Invalid.cs", invalidCode)
-}, _testOutputPath)
+                () => RoslynCompiler.CompileSource(sourceFiles, _testOutputPath)
             );
 
             // Verify error details
@@ -181,37 +195,49 @@ namespace Pulsar.Tests.CompilerTests
         public void CompileSource_MultipleFiles_CreatesAssembly()
         {
             // Arrange
-            var sourceFiles = new List<(string fileName, string content)>
+            var sourceFiles = new List<GeneratedFileInfo>
     {
-        ("RuleGroup_1.cs", @"
-        using System;
-        using System.Collections.Generic;
-        using Pulsar.Runtime.Buffers;
-
-        namespace Pulsar.Generated
+        new GeneratedFileInfo
         {
-            public partial class CompiledRules
+            FileName = "RuleGroup_1.cs",
+            FilePath = "Generated/RuleGroup_1.cs",
+            Content = @"
+            using System;
+            using System.Collections.Generic;
+            using Pulsar.Runtime.Buffers;
+
+            namespace Pulsar.Generated
             {
-                private void EvaluateLayer0(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)
+                public partial class CompiledRules
                 {
-                    if (inputs[""temperature""] > 100)
+                    private void EvaluateLayer0(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)
                     {
-                        outputs[""alert""] = 1;
+                        if (inputs[""temperature""] > 100)
+                        {
+                            outputs[""alert""] = 1;
+                        }
                     }
                 }
-            }
-        }"),
-        ("RuleCoordinator.cs", @"
-        namespace Pulsar.Generated
+            }",
+            Namespace = "Pulsar.Generated"
+        },
+        new GeneratedFileInfo
         {
-            public partial class CompiledRules
+            FileName = "RuleCoordinator.cs",
+            FilePath = "Generated/RuleCoordinator.cs",
+            Content = @"
+            namespace Pulsar.Generated
             {
-                public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)
+                public partial class CompiledRules
                 {
-                    EvaluateLayer0(inputs, outputs, bufferManager);
+                    public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)
+                    {
+                        EvaluateLayer0(inputs, outputs, bufferManager);
+                    }
                 }
-            }
-        }")
+            }",
+            Namespace = "Pulsar.Generated"
+        }
     };
 
             try
@@ -254,25 +280,37 @@ namespace Pulsar.Tests.CompilerTests
         public void CompileSource_InvalidFileInBatch_ThrowsDetailedException()
         {
             // Arrange
-            var sourceFiles = new List<(string fileName, string content)>
+            var sourceFiles = new List<GeneratedFileInfo>
     {
-        ("Valid.cs", @"
-        namespace Pulsar.Generated
+        new GeneratedFileInfo
         {
-            public partial class CompiledRules
+            FileName = "Valid.cs",
+            FilePath = "Generated/Valid.cs",
+            Content = @"
+            namespace Pulsar.Generated
             {
-                private void EvaluateLayer0() {}
-            }
-        }"),
-        ("Invalid.cs", @"
-        public class Invalid
+                public partial class CompiledRules
+                {
+                    private void EvaluateLayer0() {}
+                }
+            }",
+            Namespace = "Pulsar.Generated"
+        },
+        new GeneratedFileInfo
         {
-            public void Method()
+            FileName = "Invalid.cs",
+            FilePath = "Generated/Invalid.cs",
+            Content = @"
+            public class Invalid
             {
-                var result = undefinedVar.Process();  // Error
-                int x = ""string"";                   // Error
-            }
-        }")
+                public void Method()
+                {
+                    var result = undefinedVar.Process();  // Error
+                    int x = ""string"";                   // Error
+                }
+            }",
+            Namespace = "Pulsar.Generated"
+        }
     };
 
             // Act & Assert
@@ -292,7 +330,13 @@ namespace Pulsar.Tests.CompilerTests
         [InlineData(new string[] { }, "Source files cannot be empty")]
         public void CompileSource_InvalidInputs_ThrowsArgumentException(string[] emptyContent, string expectedError)
         {
-            var sourceFiles = emptyContent.Select(c => ("test.cs", c)).ToList();
+            var sourceFiles = emptyContent.Select(c => new GeneratedFileInfo
+            {
+                FileName = "test.cs",
+                FilePath = "Generated/test.cs",
+                Content = c,
+                Namespace = "Pulsar.Generated"
+            }).ToList();
 
             var ex = Assert.Throws<ArgumentException>(
                 () => RoslynCompiler.CompileSource(sourceFiles, _testOutputPath)
@@ -304,47 +348,65 @@ namespace Pulsar.Tests.CompilerTests
         public void CompileSource_CrossFileRuleDependencies_WorksCorrectly()
         {
             // Arrange
-            var sourceFiles = new List<(string fileName, string content)>
+            var sourceFiles = new List<GeneratedFileInfo>
     {
-        ("RuleGroup_1.cs", @"
-        namespace Pulsar.Generated
+        new GeneratedFileInfo
         {
-            public partial class CompiledRules
+            FileName = "RuleGroup_1.cs",
+            FilePath = "Generated/RuleGroup_1.cs",
+            Content = @"
+            namespace Pulsar.Generated
             {
-                private void EvaluateLayer0(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)
+                public partial class CompiledRules
                 {
-                    // Rule: TempConversion
-                    outputs[""temp_c""] = (inputs[""temp_f""] - 32) * 5/9;
-                }
-            }
-        }"),
-        ("RuleGroup_2.cs", @"
-        namespace Pulsar.Generated
-        {
-            public partial class CompiledRules
-            {
-                private void EvaluateLayer1(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)
-                {
-                    // Rule: HighTempAlert
-                    if (outputs[""temp_c""] > 30)
+                    private void EvaluateLayer0(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)
                     {
-                        outputs[""high_temp""] = 1;
+                        // Rule: TempConversion
+                        outputs[""temp_c""] = (inputs[""temp_f""] - 32) * 5/9;
                     }
                 }
-            }
-        }"),
-        ("RuleCoordinator.cs", @"
-        namespace Pulsar.Generated
+            }",
+            Namespace = "Pulsar.Generated"
+        },
+        new GeneratedFileInfo
         {
-            public partial class CompiledRules
+            FileName = "RuleGroup_2.cs",
+            FilePath = "Generated/RuleGroup_2.cs",
+            Content = @"
+            namespace Pulsar.Generated
             {
-                public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)
+                public partial class CompiledRules
                 {
-                    EvaluateLayer0(inputs, outputs, bufferManager);
-                    EvaluateLayer1(inputs, outputs, bufferManager);
+                    private void EvaluateLayer1(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)
+                    {
+                        // Rule: HighTempAlert
+                        if (outputs[""temp_c""] > 30)
+                        {
+                            outputs[""high_temp""] = 1;
+                        }
+                    }
                 }
-            }
-        }")
+            }",
+            Namespace = "Pulsar.Generated"
+        },
+        new GeneratedFileInfo
+        {
+            FileName = "RuleCoordinator.cs",
+            FilePath = "Generated/RuleCoordinator.cs",
+            Content = @"
+            namespace Pulsar.Generated
+            {
+                public partial class CompiledRules
+                {
+                    public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)
+                    {
+                        EvaluateLayer0(inputs, outputs, bufferManager);
+                        EvaluateLayer1(inputs, outputs, bufferManager);
+                    }
+                }
+            }",
+            Namespace = "Pulsar.Generated"
+        }
     };
 
             // Act & Test

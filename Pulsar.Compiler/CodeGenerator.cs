@@ -3,91 +3,87 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Pulsar.Compiler.Models;
-using Pulsar.Runtime.Buffers;
+using Pulsar.Compiler.Parsers;
 
 namespace Pulsar.Compiler.Generation
 {
     public class CodeGenerator
     {
-        private static Dictionary<string, RuleDefinition> _outputs = new();
-
-        // Modified signature to return multiple files
-        public static List<(string fileName, string content)> GenerateCSharp(
-            List<RuleDefinition> sortedRules,
-            int rulesPerGroup = 50)  // New parameter
+        public static List<GeneratedFileInfo> GenerateCSharp(List<RuleDefinition> rules)
         {
-            ArgumentNullException.ThrowIfNull(sortedRules, nameof(sortedRules));
-            var result = new List<(string fileName, string content)>();
+            var files = new List<GeneratedFileInfo>();
+            var layerMap = AssignLayers(rules);
+            var rulesByLayer = GetRulesByLayer(rules, layerMap);
+            var ruleSourceMap = new Dictionary<string, GeneratedSourceInfo>();
 
-            // Store outputs from rules (keeping existing logic)
-            _outputs.Clear();
-            foreach (var rule in sortedRules)
+            // Generate layer files first to get line numbers
+            foreach (var layer in rulesByLayer)
             {
-                foreach (var action in rule.Actions.OfType<SetValueAction>())
+                var layerFile = GenerateLayerFile(layer.Value, layer.Key);
+                
+                // Track source info for each rule in this layer
+                var lineNumber = 1; // Start after the header
+                foreach (var rule in layer.Value)
                 {
-                    _outputs[action.Key] = rule;
+                    var ruleInfo = new GeneratedSourceInfo
+                    {
+                        SourceFile = rule.SourceFile,
+                        LineNumber = rule.LineNumber,
+                        GeneratedFile = layerFile.FileName,
+                        GeneratedLineStart = lineNumber,
+                        GeneratedLineEnd = lineNumber + CountLinesForRule(rule)
+                    };
+                    ruleSourceMap[rule.Name] = ruleInfo;
+                    lineNumber = ruleInfo.GeneratedLineEnd + 1;
                 }
+                
+                files.Add(layerFile);
             }
 
-            // Get distinct layers (keeping existing logic)
-            var rulesByLayer = GetRulesByLayer(sortedRules);
-            var layers = rulesByLayer.Keys.OrderBy(l => l).ToList();
+            // Generate the coordinator class with source tracking
+            var coordinatorFile = GenerateCoordinatorFile(rulesByLayer);
+            coordinatorFile.RuleSourceMap = ruleSourceMap;
+            files.Insert(0, coordinatorFile);
 
-            // Split rules into groups while respecting layers
-            var currentGroup = 1;
-            var currentBuilder = new StringBuilder();
-            int rulesInCurrentGroup = 0;
-
-            // Begin first group file
-            WriteFileHeader(currentBuilder);
-
-            foreach (var layer in layers)
-            {
-                var layerRules = rulesByLayer[layer];
-
-                // If adding this layer's rules would exceed the group size, start new group
-                if (rulesInCurrentGroup + layerRules.Count > rulesPerGroup && rulesInCurrentGroup > 0)
-                {
-                    WriteFileFooter(currentBuilder);
-                    result.Add(($"RuleGroup_{currentGroup}.cs", currentBuilder.ToString()));
-                    currentGroup++;
-                    currentBuilder = new StringBuilder();
-                    WriteFileHeader(currentBuilder);
-                    rulesInCurrentGroup = 0;
-                }
-
-                GenerateLayerMethod(currentBuilder, layer, layerRules);
-                rulesInCurrentGroup += layerRules.Count;
-            }
-
-            // Add final group
-            if (rulesInCurrentGroup > 0)
-            {
-                WriteFileFooter(currentBuilder);
-                result.Add(($"RuleGroup_{currentGroup}.cs", currentBuilder.ToString()));
-            }
-
-            // Generate coordinator file
-            result.Add(GenerateCoordinatorFile(layers, currentGroup));
-
-            return result;
+            return files;
         }
 
-        private static void WriteFileHeader(StringBuilder builder)
+        private static int CountLinesForRule(RuleDefinition rule)
+        {
+            // Estimate the number of lines this rule will generate
+            int lines = 4; // Basic overhead (rule header, debug line)
+            
+            if (rule.SourceInfo != null)
+                lines++;
+            
+            if (!string.IsNullOrEmpty(rule.Description))
+                lines++;
+
+            if (rule.Conditions != null)
+            {
+                lines += 6; // if statement, debug lines, else block
+                if (rule.Conditions.All != null)
+                    lines += rule.Conditions.All.Count * 2;
+                if (rule.Conditions.Any != null)
+                    lines += rule.Conditions.Any.Count * 2;
+            }
+
+            lines += rule.Actions.Count * 2; // Each action takes about 2 lines
+
+            return lines;
+        }
+
+        private static void WriteFileHeader(StringBuilder builder, string @namespace)
         {
             builder.AppendLine("using System;");
             builder.AppendLine("using System.Collections.Generic;");
-            builder.AppendLine("using Pulsar.Runtime.Buffers;");
             builder.AppendLine("using Pulsar;");
             builder.AppendLine();
-            builder.AppendLine("namespace Pulsar.Generated");
+            builder.AppendLine($"namespace {@namespace}");
             builder.AppendLine("{");
             builder.AppendLine("    public partial class CompiledRules");
             builder.AppendLine("    {");
@@ -99,79 +95,170 @@ namespace Pulsar.Compiler.Generation
             builder.AppendLine("}");
         }
 
-        private static (string fileName, string content) GenerateCoordinatorFile(
-            List<int> layers,
-            int groupCount)
+        private static GeneratedFileInfo GenerateCoordinatorFile(
+            Dictionary<int, List<RuleDefinition>> rulesByLayer,
+            string @namespace = "Pulsar.Generated"
+        )
         {
             var builder = new StringBuilder();
-            WriteFileHeader(builder);
+            WriteFileHeader(builder, @namespace);
 
-            // Generate main evaluation method
-            builder.AppendLine(
-                "        public void Evaluate(Dictionary<string, double> inputs, " +
-                "Dictionary<string, double> outputs, RingBufferManager bufferManager)");
+            builder.AppendLine("        public class RuleCoordinator");
             builder.AppendLine("        {");
+            builder.AppendLine(
+                "            public void EvaluateRules(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)");
+            builder.AppendLine("            {");
 
             // Call each layer's evaluation method in order
-            foreach (var layer in layers)
+            foreach (var layer in rulesByLayer.Keys.OrderBy(l => l))
             {
-                builder.AppendLine($"            EvaluateLayer{layer}(inputs, outputs, bufferManager);");
+                builder.AppendLine($"                EvaluateLayer{layer}(inputs, outputs, bufferManager);");
+            }
+
+            builder.AppendLine("            }");
+            builder.AppendLine("        }");
+
+            WriteFileFooter(builder);
+            var content = builder.ToString();
+            return new GeneratedFileInfo
+            {
+                FileName = "RuleCoordinator.cs",
+                FilePath = "Generated/RuleCoordinator.cs",
+                Content = content,
+                Hash = ComputeHash(content),
+                Namespace = @namespace,
+                LayerRange = new RuleLayerRange
+                {
+                    Start = rulesByLayer.Keys.Min(),
+                    End = rulesByLayer.Keys.Max()
+                }
+            };
+        }
+
+        private static GeneratedFileInfo GenerateLayerFile(
+            List<RuleDefinition> rules, 
+            int layer,
+            string @namespace = "Pulsar.Generated"
+        )
+        {
+            var builder = new StringBuilder();
+            WriteFileHeader(builder, @namespace);
+
+            // Generate the layer class
+            builder.AppendLine($"        private void EvaluateLayer{layer}(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)");
+            builder.AppendLine("        {");
+
+            foreach (var rule in rules)
+            {
+                GenerateRuleMethod(builder, rule);
             }
 
             builder.AppendLine("        }");
 
             WriteFileFooter(builder);
-            return ("RuleCoordinator.cs", builder.ToString());
+            var content = builder.ToString();
+            return new GeneratedFileInfo
+            {
+                FileName = $"RuleGroup_{layer}.cs",
+                FilePath = $"Generated/RuleGroup_{layer}.cs",
+                Content = content,
+                Hash = ComputeHash(content),
+                Namespace = @namespace,
+                LayerRange = new RuleLayerRange { Start = layer, End = layer }
+            };
         }
 
+        private static void GenerateRuleMethod(StringBuilder builder, RuleDefinition rule)
+        {
+            // Add source tracing comment with file info
+            builder.AppendLine($"        // Rule: {rule.Name}");
+            if (rule.SourceInfo != null)
+            {
+                builder.AppendLine($"        // Source: {rule.SourceInfo}");
+            }
+            if (!string.IsNullOrEmpty(rule.Description))
+            {
+                builder.AppendLine($"        // Description: {rule.Description}");
+            }
+
+            builder.AppendLine(
+                $"        System.Diagnostics.Debug.WriteLine(\"Evaluating rule: {rule.Name}\");"
+            );
+
+            string? condition = GenerateCondition(rule.Conditions);
+            System.Diagnostics.Debug.WriteLine($"Generated condition: {condition}");
+
+            if (!string.IsNullOrEmpty(condition))
+            {
+                // Rest of the existing condition and action generation code remains the same
+                var escapedCondition = condition.Replace("\"", "\\\"");
+                builder.AppendLine(
+                    $"        System.Diagnostics.Debug.WriteLine(\"Checking condition: {escapedCondition}\");"
+                );
+
+                builder.AppendLine($"        if ({condition})");
+                builder.AppendLine("        {");
+                builder.AppendLine(
+                    "            System.Diagnostics.Debug.WriteLine(\"Condition is true, executing actions\");"
+                );
+                GenerateActions(builder, rule.Actions);
+                builder.AppendLine("        }");
+                builder.AppendLine("        else");
+                builder.AppendLine("        {");
+                builder.AppendLine(
+                    "            System.Diagnostics.Debug.WriteLine(\"Condition is false, skipping actions\");"
+                );
+                builder.AppendLine("        }");
+            }
+            else
+            {
+                builder.AppendLine(
+                    "            System.Diagnostics.Debug.WriteLine(\"No conditions, executing actions directly\");"
+                );
+                GenerateActions(builder, rule.Actions);
+            }
+        }
+
+        private static void GenerateActions(StringBuilder builder, List<ActionDefinition> actions)
+        {
+            foreach (var action in actions.OfType<SetValueAction>())
+            {
+                string valueAssignment;
+                if (action.Value.HasValue)
+                {
+                    valueAssignment = action.Value.Value.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture
+                    );
+                }
+                else if (!string.IsNullOrEmpty(action.ValueExpression))
+                {
+                    valueAssignment = FixupExpression(action.ValueExpression);
+                }
+                else
+                {
+                    valueAssignment = "0";
+                }
+
+                // Properly escape quotation marks for debug output
+                var escapedAssignment = valueAssignment.Replace("\"", "\\\"");
+                builder.AppendLine(
+                    $"            System.Diagnostics.Debug.WriteLine(\"Setting {action.Key} to {escapedAssignment}\");"
+                );
+                builder.AppendLine($"            outputs[\"{action.Key}\"] = {valueAssignment};");
+            }
+        }
 
         private static Dictionary<int, List<RuleDefinition>> GetRulesByLayer(
-            List<RuleDefinition> sortedRules
+            List<RuleDefinition> rules,
+            Dictionary<string, int> layerMap
         )
         {
             var rulesByLayer = new Dictionary<int, List<RuleDefinition>>();
 
-            // Analyze dependencies to determine layers
-            var dependencies = new Dictionary<string, HashSet<string>>();
-            var outputProducers = new Dictionary<string, RuleDefinition>();
-
-            // First pass: collect all outputs and their producers
-            foreach (var rule in sortedRules)
-            {
-                foreach (var action in rule.Actions.OfType<SetValueAction>())
-                {
-                    outputProducers[action.Key] = rule;
-                }
-            }
-
-            // Second pass: build dependency graph
-            foreach (var rule in sortedRules)
-            {
-                dependencies[rule.Name] = new HashSet<string>();
-
-                // Check conditions for dependencies
-                if (rule.Conditions != null)
-                {
-                    foreach (var condition in GetAllConditions(rule.Conditions))
-                    {
-                        if (condition is ComparisonCondition comp)
-                        {
-                            if (outputProducers.TryGetValue(comp.Sensor, out var producer))
-                            {
-                                dependencies[rule.Name].Add(producer.Name);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Assign layers based on longest path from root
-            var layers = AssignLayers(dependencies);
-
             // Group rules by their assigned layer
-            foreach (var rule in sortedRules)
+            foreach (var rule in rules)
             {
-                var layer = layers[rule.Name];
+                var layer = layerMap[rule.Name];
                 if (!rulesByLayer.ContainsKey(layer))
                 {
                     rulesByLayer[layer] = new List<RuleDefinition>();
@@ -219,220 +306,54 @@ namespace Pulsar.Compiler.Generation
             currentPath.Remove(rule);
         }
 
-        private static void GenerateLayerMethod(
-            StringBuilder builder,
-            int layer,
-            List<RuleDefinition> rules)
+        private static Dictionary<string, int> AssignLayers(List<RuleDefinition> rules)
         {
-            builder.AppendLine(
-                $"    private void EvaluateLayer{layer}(Dictionary<string, double> inputs, " +
-                "Dictionary<string, double> outputs, RingBufferManager bufferManager)");
-            builder.AppendLine("    {");
+            var dependencies = new Dictionary<string, HashSet<string>>();
+            var outputToRule = new Dictionary<string, string>();
+            var layers = new Dictionary<string, int>();
+            var visited = new HashSet<string>();
 
-            // Add debug output at start of layer
-            builder.AppendLine(
-                $"        System.Diagnostics.Debug.WriteLine(\"Evaluating Layer {layer}\");"
-            );
-            builder.AppendLine("        System.Diagnostics.Debug.WriteLine(\"Current inputs:\");");
-            builder.AppendLine("        foreach(var kvp in inputs)");
-            builder.AppendLine("        {");
-            builder.AppendLine(
-                "            System.Diagnostics.Debug.WriteLine($\"  {kvp.Key}: {kvp.Value}\");"
-            );
-            builder.AppendLine("        }");
+            // First, build a map of outputs to rules
+            foreach (var rule in rules)
+            {
+                dependencies[rule.Name] = new HashSet<string>();
+                foreach (var action in rule.Actions.OfType<SetValueAction>())
+                {
+                    outputToRule[action.Key] = rule.Name;
+                }
+            }
+
+            // Then analyze dependencies to determine layers
+            foreach (var rule in rules)
+            {
+                // Check conditions for dependencies
+                if (rule.Conditions != null)
+                {
+                    foreach (var condition in GetAllConditions(rule.Conditions))
+                    {
+                        if (condition is ComparisonCondition comp && outputToRule.ContainsKey(comp.Sensor))
+                        {
+                            dependencies[rule.Name].Add(outputToRule[comp.Sensor]);
+                        }
+                    }
+                }
+            }
 
             foreach (var rule in rules)
             {
-                // Add source tracing comment
-                builder.AppendLine($"        // Rule: {rule.Name}");
-                if (!string.IsNullOrEmpty(rule.Description))
+                if (!visited.Contains(rule.Name))
                 {
-                    builder.AppendLine($"        // Description: {rule.Description}");
-                }
-
-                builder.AppendLine(
-                    $"        System.Diagnostics.Debug.WriteLine(\"Evaluating rule: {rule.Name}\");"
-                );
-
-                string? condition = GenerateCondition(rule.Conditions);
-                System.Diagnostics.Debug.WriteLine($"Generated condition: {condition}");
-
-                if (!string.IsNullOrEmpty(condition))
-                {
-                    // Rest of the existing condition and action generation code remains the same
-                    var escapedCondition = condition.Replace("\"", "\\\"");
-                    builder.AppendLine(
-                        $"        System.Diagnostics.Debug.WriteLine(\"Checking condition: {escapedCondition}\");"
-                    );
-
-                    builder.AppendLine($"        if ({condition})");
-                    builder.AppendLine("        {");
-                    builder.AppendLine(
-                        "            System.Diagnostics.Debug.WriteLine(\"Condition is true, executing actions\");"
-                    );
-                    GenerateActions(builder, rule.Actions);
-                    builder.AppendLine("        }");
-                    builder.AppendLine("        else");
-                    builder.AppendLine("        {");
-                    builder.AppendLine(
-                        "            System.Diagnostics.Debug.WriteLine(\"Condition is false, skipping actions\");"
-                    );
-                    builder.AppendLine("        }");
-                }
-                else
-                {
-                    builder.AppendLine(
-                        "            System.Diagnostics.Debug.WriteLine(\"No conditions, executing actions directly\");"
-                    );
-                    GenerateActions(builder, rule.Actions);
+                    AssignLayersDFS(rule.Name, dependencies, layers, visited, new HashSet<string>());
                 }
             }
 
-            // Add debug output at end of layer
-            builder.AppendLine("        System.Diagnostics.Debug.WriteLine(\"Current outputs:\");");
-            builder.AppendLine("        foreach(var kvp in outputs)");
-            builder.AppendLine("        {");
-            builder.AppendLine(
-                "            System.Diagnostics.Debug.WriteLine($\"  {kvp.Key}: {kvp.Value}\");"
-            );
-            builder.AppendLine("        }");
-
-            builder.AppendLine("    }");
-            builder.AppendLine();
-        }
-
-        public static string FixupExpression(string expression)
-        {
-            var pattern =
-                @"(?<function>Math\.\w+)|(?<number>\d*\.?\d+)|(?<operator>[+\-*/><]=?|==|!=)|(?<variable>[a-zA-Z_][a-zA-Z0-9_]*)|(?<parentheses>[\(\)])";
-
-            var tokenized = new List<string>();
-            int position = 0;
-
-            foreach (Match match in Regex.Matches(expression, pattern))
-            {
-                // Add any skipped characters (spaces typically)
-                if (match.Index > position)
-                {
-                    tokenized.Add(expression.Substring(position, match.Index - position));
-                }
-
-                var token = match.Value;
-
-                if (match.Groups["function"].Success)
-                {
-                    // Math functions remain unchanged
-                    tokenized.Add(token);
-                }
-                else if (match.Groups["number"].Success)
-                {
-                    // Numbers remain unchanged
-                    tokenized.Add(token);
-                }
-                else if (match.Groups["operator"].Success)
-                {
-                    // Operators remain unchanged
-                    tokenized.Add(token);
-                }
-                else if (match.Groups["variable"].Success)
-                {
-                    // Check if it's a Math function argument
-                    bool isAfterMathDot = false;
-                    if (match.Index >= 5)
-                    {
-                        var precedingText = expression.Substring(match.Index - 5, 5);
-                        isAfterMathDot = precedingText.Equals("Math.", StringComparison.Ordinal);
-                    }
-
-                    if (!isAfterMathDot)
-                    {
-                        // Check if this is a computed value
-                        if (_outputs.ContainsKey(token))
-                        {
-                            tokenized.Add($"outputs[\"{token}\"]");
-                        }
-                        else
-                        {
-                            tokenized.Add($"inputs[\"{token}\"]");
-                        }
-                    }
-                    else
-                    {
-                        tokenized.Add(token);
-                    }
-                }
-                else if (match.Groups["parentheses"].Success)
-                {
-                    // Parentheses remain unchanged
-                    tokenized.Add(token);
-                }
-
-                position = match.Index + match.Length;
-            }
-
-            // Add any remaining characters
-            if (position < expression.Length)
-            {
-                tokenized.Add(expression.Substring(position));
-            }
-
-            var result = string.Join("", tokenized).Trim();
-            return NeedsParentheses(result) ? $"({result})" : result;
-        }
-
-        private static bool NeedsParentheses(string expression)
-        {
-            // Add parentheses if the expression:
-            // 1. Contains certain operators (+, -, *, /) AND comparison operators
-            // 2. Contains Math functions
-            // 3. Contains multiple comparison operators
-            var hasArithmetic = Regex.IsMatch(expression, @"[+\-*/]");
-            var hasComparison = Regex.IsMatch(expression, @"[<>]=?|==|!=");
-            var hasMathFunction = expression.Contains("Math.");
-            var hasMultipleComparisons = Regex.Matches(expression, @"[<>]=?|==|!=").Count > 1;
-
-            return (hasArithmetic && hasComparison) || hasMathFunction || hasMultipleComparisons;
-        }
-
-        public static class ExpressionHelper
-        {
-            public static bool ValidateGeneratedExpression(string expression)
-            {
-                try
-                {
-                    // Try to compile the expression
-                    var code =
-                        $@"
-                using System;
-                using System.Collections.Generic;
-                public class Test {{
-                    public bool Evaluate(Dictionary<string, double> inputs) {{
-                        return {expression};
-                    }}
-                }}";
-
-                    var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(code);
-                    var diagnostics = tree.GetDiagnostics();
-                    return !diagnostics.Any(d =>
-                        d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error
-                    );
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Expression validation failed: {ex.Message}");
-                    return false;
-                }
-            }
+            return layers;
         }
 
         private static string? GenerateCondition(ConditionGroup? conditions)
         {
             if (conditions == null)
                 return null;
-
-            Debug.WriteLine("Processing ConditionGroup:");
-            Debug.WriteLine($"  All conditions count: {conditions.All?.Count ?? 0}");
-            Debug.WriteLine($"  Any conditions count: {conditions.Any?.Count ?? 0}");
 
             var result = "";
 
@@ -442,21 +363,11 @@ namespace Pulsar.Compiler.Generation
                 var allConditions = new List<string>();
                 foreach (var condition in conditions.All)
                 {
-                    Debug.WriteLine($"Processing All condition of type: {condition.GetType().Name}");
                     string? conditionStr = null;
 
                     if (condition is ComparisonCondition comp)
                     {
-                        // Check if this sensor is a computed value
-                        if (_outputs.ContainsKey(comp.Sensor))
-                        {
-                            conditionStr = $"outputs[\"{comp.Sensor}\"]";
-                        }
-                        else
-                        {
-                            conditionStr = $"inputs[\"{comp.Sensor}\"]";
-                        }
-                        conditionStr += $" {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                        conditionStr = $"{comp.Sensor} {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
                     }
                     else if (condition is ThresholdOverTimeCondition temporal)
                     {
@@ -465,18 +376,7 @@ namespace Pulsar.Compiler.Generation
                     }
                     else if (condition is ExpressionCondition expr)
                     {
-                        var fixedExpression = FixupExpression(expr.Expression);
-                        bool needsParentheses =
-                            fixedExpression.Contains("Math.")
-                            || fixedExpression.Contains("+")
-                            || fixedExpression.Contains("-")
-                            || fixedExpression.Contains("*")
-                            || fixedExpression.Contains("/")
-                            || fixedExpression.Contains("&&")
-                            || fixedExpression.Contains("||");
-
-                        conditionStr = needsParentheses ? $"({fixedExpression})" : fixedExpression;
-                        Debug.WriteLine($"Expression '{expr.Expression}' converted to '{conditionStr}'");
+                        conditionStr = FixupExpression(expr.Expression);
                     }
                     else if (condition is ConditionGroup group)
                     {
@@ -515,16 +415,7 @@ namespace Pulsar.Compiler.Generation
 
                     if (condition is ComparisonCondition comp)
                     {
-                        // Check if this sensor is a computed value
-                        if (_outputs.ContainsKey(comp.Sensor))
-                        {
-                            conditionStr = $"outputs[\"{comp.Sensor}\"]";
-                        }
-                        else
-                        {
-                            conditionStr = $"inputs[\"{comp.Sensor}\"]";
-                        }
-                        conditionStr += $" {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                        conditionStr = $"{comp.Sensor} {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
                     }
                     else if (condition is ThresholdOverTimeCondition temporal)
                     {
@@ -533,17 +424,7 @@ namespace Pulsar.Compiler.Generation
                     }
                     else if (condition is ExpressionCondition expr)
                     {
-                        bool needsParentheses =
-                            expr.Expression.Contains("Math.")
-                            || expr.Expression.Contains("+")
-                            || expr.Expression.Contains("-")
-                            || expr.Expression.Contains("*")
-                            || expr.Expression.Contains("/")
-                            || expr.Expression.Contains("&&")
-                            || expr.Expression.Contains("||");
-
-                        conditionStr = needsParentheses ? $"({expr.Expression})" : expr.Expression;
-                        Debug.WriteLine($"Expression '{expr.Expression}' {(needsParentheses ? "needs" : "does not need")} parentheses");
+                        conditionStr = FixupExpression(expr.Expression);
                     }
                     else if (condition is ConditionGroup group)
                     {
@@ -586,53 +467,6 @@ namespace Pulsar.Compiler.Generation
             return conditions;
         }
 
-        private static Dictionary<string, int> AssignLayers(
-            Dictionary<string, HashSet<string>> dependencies
-        )
-        {
-            var layers = new Dictionary<string, int>();
-            var visited = new HashSet<string>();
-
-            foreach (var rule in dependencies.Keys)
-            {
-                if (!visited.Contains(rule))
-                {
-                    AssignLayersDFS(rule, dependencies, layers, visited, new HashSet<string>());
-                }
-            }
-
-            return layers;
-        }
-
-        private static void GenerateActions(StringBuilder builder, List<ActionDefinition> actions)
-        {
-            foreach (var action in actions.OfType<SetValueAction>())
-            {
-                string valueAssignment;
-                if (action.Value.HasValue)
-                {
-                    valueAssignment = action.Value.Value.ToString(
-                        System.Globalization.CultureInfo.InvariantCulture
-                    );
-                }
-                else if (!string.IsNullOrEmpty(action.ValueExpression))
-                {
-                    valueAssignment = FixupExpression(action.ValueExpression);
-                }
-                else
-                {
-                    valueAssignment = "0";
-                }
-
-                // Properly escape quotation marks for debug output
-                var escapedAssignment = valueAssignment.Replace("\"", "\\\"");
-                builder.AppendLine(
-                    $"            System.Diagnostics.Debug.WriteLine(\"Setting {action.Key} to {escapedAssignment}\");"
-                );
-                builder.AppendLine($"            outputs[\"{action.Key}\"] = {valueAssignment};");
-            }
-        }
-
         private static string GetOperator(ComparisonOperator op)
         {
             return op switch
@@ -645,6 +479,45 @@ namespace Pulsar.Compiler.Generation
                 ComparisonOperator.NotEqualTo => "!=",
                 _ => throw new InvalidOperationException($"Unsupported operator: {op}"),
             };
+        }
+
+        public static string FixupExpression(string expression)
+        {
+            // Replace any unsupported operators or functions with C# equivalents
+            expression = expression.Replace("^", "Math.Pow");
+            expression = expression.Replace("sqrt", "Math.Sqrt");
+            expression = expression.Replace("abs", "Math.Abs");
+            expression = expression.Replace("sin", "Math.Sin");
+            expression = expression.Replace("cos", "Math.Cos");
+            expression = expression.Replace("tan", "Math.Tan");
+            expression = expression.Replace("log", "Math.Log");
+            expression = expression.Replace("exp", "Math.Exp");
+            expression = expression.Replace("floor", "Math.Floor");
+            expression = expression.Replace("ceil", "Math.Ceiling");
+            expression = expression.Replace("round", "Math.Round");
+
+            // Handle power operator special case (a^b -> Math.Pow(a,b))
+            var powerRegex = new Regex(@"Math\.Pow\(([^,]+)\)");
+            expression = powerRegex.Replace(expression, match =>
+            {
+                var arg = match.Groups[1].Value;
+                var parts = arg.Split('^');
+                if (parts.Length == 2)
+                {
+                    return $"Math.Pow({parts[0].Trim()}, {parts[1].Trim()})";
+                }
+                return match.Value;
+            });
+
+            return expression;
+        }
+
+        private static string ComputeHash(string content)
+        {
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+            var hash = sha.ComputeHash(bytes);
+            return Convert.ToBase64String(hash);
         }
     }
 }

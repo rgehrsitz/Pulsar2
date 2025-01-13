@@ -240,5 +240,54 @@ rules:
             Assert.Empty(rules[0].Conditions.Any);
             Assert.NotNull(rules[0].Actions);
         }
+
+        [Fact]
+        public void ParseRules_ShouldTrackSourceInformation()
+        {
+            // Arrange
+            string yamlContent =
+                @"
+rules:
+  - name: 'Rule1'
+    description: 'First rule'
+    actions:
+      - set_value:
+          key: 'output1'
+          value: 1.0
+  - name: 'Rule2'
+    description: 'Second rule'
+    conditions:
+      all:
+        - condition:
+            type: comparison
+            sensor: 'input1'
+            operator: '>'
+            value: 5.0
+    actions:
+      - set_value:
+          key: 'output2'
+          value: 2.0
+";
+            var validSensors = new List<string> { "input1", "output1", "output2" };
+            var fileName = "test_rules.yaml";
+
+            // Act
+            var rules = _parser.ParseRules(yamlContent, validSensors, fileName);
+
+            // Assert
+            Assert.Equal(2, rules.Count);
+            
+            // Check Rule1 source info
+            Assert.NotNull(rules[0].SourceInfo);
+            Assert.Equal(fileName, rules[0].SourceInfo.FileName);
+            Assert.Equal(3, rules[0].SourceInfo.LineNumber); // YAML is 0-based
+            Assert.NotEmpty(rules[0].SourceInfo.OriginalText);
+
+            // Check Rule2 source info
+            Assert.NotNull(rules[1].SourceInfo);
+            Assert.Equal(fileName, rules[1].SourceInfo.FileName);
+            Assert.Equal(9, rules[1].SourceInfo.LineNumber);
+            Assert.NotEmpty(rules[1].SourceInfo.OriginalText);
+        }
     }
 }

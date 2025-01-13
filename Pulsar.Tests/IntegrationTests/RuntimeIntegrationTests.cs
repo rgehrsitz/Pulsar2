@@ -345,7 +345,7 @@ rules:
         private void CompileRules(string yamlContent, List<string> validSensors)
         {
             var parser = new DslParser();
-            var rules = parser.ParseRules(yamlContent, validSensors);
+            var rules = parser.ParseRules(yamlContent, validSensors, "test_rules.yaml");
 
             var analyzer = new DependencyAnalyzer();
             var sortedRules = analyzer.AnalyzeDependencies(rules);

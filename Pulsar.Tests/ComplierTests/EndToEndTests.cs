@@ -53,9 +53,13 @@ namespace Pulsar.Tests.CompilerTests
         private string CreateTestRulesDll()
         {
             var dllPath = Path.Combine(Path.GetTempPath(), $"TestRules_{Guid.NewGuid()}.dll");
-            var sourceFiles = new List<(string fileName, string content)>
+            var sourceFiles = new List<GeneratedFileInfo>
             {
-                ("CompiledRules.cs", @"
+                new GeneratedFileInfo
+                {
+                    FileName = "CompiledRules.cs",
+                    FilePath = "Generated/CompiledRules.cs",
+                    Content = @"
         using System.Collections.Generic;
         using Pulsar.Runtime.Buffers;
 
@@ -71,7 +75,9 @@ namespace Pulsar.Tests.CompilerTests
                     outputs[""output1""] = value * 2;
                 }
             }
-        }")
+        }",
+                    Namespace = "Pulsar.Generated"
+                }
             };
 
             RoslynCompiler.CompileSource(sourceFiles, dllPath);
@@ -103,11 +109,11 @@ rules:
             {
                 // Step 1: Parse YAML to RuleDefinitions
                 var parser = new DslParser();
-                var rules = parser.ParseRules(yamlContent, validSensors);
+                var rules = parser.ParseRules(yamlContent, validSensors, "test_rules.yaml");
 
                 // Step 2: Generate C# code
                 var generatedFiles = CodeGenerator.GenerateCSharp(rules);
-                var csharpCode = string.Join("\n", generatedFiles.Select(f => f.content));
+                var csharpCode = string.Join("\n", generatedFiles.Select(f => f.Content));
                 _output.WriteLine("\nGenerated C# Code:");
                 _output.WriteLine(csharpCode);
 
@@ -214,8 +220,9 @@ rules:
             {
                 // Parse and compile as before
                 var parser = new DslParser();
-                var rules = parser.ParseRules(yamlContent, validSensors);
+                var rules = parser.ParseRules(yamlContent, validSensors, "test_rules.yaml");
                 var generatedFiles = CodeGenerator.GenerateCSharp(rules);
+                var code = string.Join("\n", generatedFiles.Select(f => f.Content));
                 RoslynCompiler.CompileSource(generatedFiles, _outputPath);
 
                 // Load and test
@@ -297,7 +304,7 @@ rules:
             {
                 // Act - Full Pipeline
                 var parser = new DslParser();
-                var rules = parser.ParseRules(yamlContent, validSensors);
+                var rules = parser.ParseRules(yamlContent, validSensors, "test_rules.yaml");
                 _output.WriteLine("Rules parsed successfully");
 
                 var analyzer = new DependencyAnalyzer();
@@ -305,7 +312,7 @@ rules:
                 _output.WriteLine("Dependencies analyzed");
 
                 var generatedFiles = CodeGenerator.GenerateCSharp(sortedRules);
-                var code = string.Join("\n", generatedFiles.Select(f => f.content));
+                var code = string.Join("\n", generatedFiles.Select(f => f.Content));
                 _output.WriteLine("\nGenerated C# Code:");
                 _output.WriteLine(code);
 
@@ -411,7 +418,7 @@ rules:
             {
                 // Act - Compile Pipeline
                 var parser = new DslParser();
-                var rules = parser.ParseRules(yamlContent, validSensors);
+                var rules = parser.ParseRules(yamlContent, validSensors, "test_rules.yaml");
 
                 var analyzer = new DependencyAnalyzer();
                 var sortedRules = analyzer.AnalyzeDependencies(rules);
@@ -437,7 +444,7 @@ rules:
                 );
 
                 var generatedFiles = CodeGenerator.GenerateCSharp(sortedRules);
-                var code = string.Join("\n", generatedFiles.Select(f => f.content));
+                var code = string.Join("\n", generatedFiles.Select(f => f.Content));
                 _output.WriteLine("\nGenerated Code:");
                 _output.WriteLine(code);
 

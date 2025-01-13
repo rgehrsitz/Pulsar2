@@ -44,7 +44,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
-            var code = generatedFiles[0].content;
+            var code = generatedFiles[0].Content;
 
             // Assert
             Assert.Contains("public class CompiledRules", code);
@@ -113,7 +113,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule1, rule2 });
-            var code = generatedFiles[0].content;
+            var code = generatedFiles[0].Content;
 
             // Assert
             Assert.Contains("EvaluateLayer0", code);
@@ -152,7 +152,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
-            var code = generatedFiles[0].content;
+            var code = generatedFiles[0].Content;
 
             // Assert
             // Test the condition in the if statement
@@ -207,7 +207,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
-            var code = generatedFiles[0].content;
+            var code = generatedFiles[0].Content;
 
             // Assert
             // Test complex expression with Math function
@@ -238,7 +238,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(rules);
-            var code = generatedFiles[0].content;
+            var code = generatedFiles[0].Content;
 
             // Assert
             Assert.Contains("public class CompiledRules", code);
@@ -280,7 +280,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
-            var code = generatedFiles[0].content;
+            var code = generatedFiles[0].Content;
 
             // Assert
             Assert.Contains("if (inputs[\"temp1\"] > 100 || inputs[\"temp2\"] < 0)", code);
@@ -332,7 +332,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
-            var code = generatedFiles[0].content;
+            var code = generatedFiles[0].Content;
 
             // Assert
             System.Diagnostics.Debug.WriteLine("Generated code:");
@@ -391,7 +391,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
-            var code = generatedFiles[0].content;
+            var code = generatedFiles[0].Content;
 
             // Assert
             Assert.Contains(
@@ -464,7 +464,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
-            var code = generatedFiles[0].content;
+            var code = generatedFiles[0].Content;
 
             // Assert
             const string expectedCondition =
@@ -511,7 +511,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
-            var code = generatedFiles[0].content;
+            var code = generatedFiles[0].Content;
 
             // Assert
             Assert.Contains("outputs[\"value\"] = 1", code);
@@ -529,7 +529,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(rules);
-            var code = generatedFiles[0].content;
+            var code = generatedFiles[0].Content;
 
             // Assert
             Assert.Contains(
@@ -570,7 +570,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(rules);
-            var code = generatedFiles[0].content;
+            var code = generatedFiles[0].Content;
 
             // Assert
             Assert.Contains(
@@ -618,7 +618,7 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(rules);
-            var code = string.Join("\n", generatedFiles.Select(f => f.content));
+            var code = string.Join("\n", generatedFiles.Select(f => f.Content));
 
             // Assert
             Assert.Contains("EvaluateLayer0", code);

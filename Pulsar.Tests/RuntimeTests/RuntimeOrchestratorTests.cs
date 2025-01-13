@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Moq;
+using Pulsar.Compiler.Models;
 using Pulsar.Runtime;
 using Pulsar.Runtime.Services;
 using StackExchange.Redis;
@@ -73,9 +74,7 @@ public class RuntimeOrchestratorTests : IDisposable
     private string CreateTestRulesDll()
     {
         var dllPath = Path.Combine(Path.GetTempPath(), $"TestRules_{Guid.NewGuid()}.dll");
-        var sourceFiles = new List<(string fileName, string content)>
-        {
-            ("CompiledRules.cs", @"
+        var sourceFiles = CreateSourceFiles(@"
         using System.Collections.Generic;
         using Pulsar.Runtime.Buffers;
 
@@ -91,11 +90,24 @@ public class RuntimeOrchestratorTests : IDisposable
                     outputs[""output1""] = value * 2;
                 }
             }
-        }")
-        };
+        }");
 
         Pulsar.Compiler.RoslynCompiler.CompileSource(sourceFiles, dllPath);
         return dllPath;
+    }
+
+    private static List<GeneratedFileInfo> CreateSourceFiles(string code)
+    {
+        return new List<GeneratedFileInfo>
+        {
+            new GeneratedFileInfo
+            {
+                FileName = "CompiledRules.cs",
+                FilePath = "Generated/CompiledRules.cs",
+                Content = code,
+                Namespace = "Pulsar.Generated"
+            }
+        };
     }
 
     public void Dispose()

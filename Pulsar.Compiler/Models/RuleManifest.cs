@@ -55,6 +55,9 @@ namespace Pulsar.Compiler.Models
         [JsonPropertyName("filePath")]
         public string FilePath { get; set; } = string.Empty;
 
+        [JsonPropertyName("content")]
+        public string Content { get; set; } = string.Empty;
+
         [JsonPropertyName("ruleLayerRange")]
         public RuleLayerRange LayerRange { get; set; } = new();
 
@@ -63,6 +66,12 @@ namespace Pulsar.Compiler.Models
 
         [JsonPropertyName("hash")]
         public string Hash { get; set; } = string.Empty;
+
+        [JsonPropertyName("namespace")]
+        public string Namespace { get; set; } = "Pulsar.Generated";
+
+        [JsonPropertyName("ruleSourceMap")]
+        public Dictionary<string, GeneratedSourceInfo> RuleSourceMap { get; set; } = new();
     }
 
     public class RuleLayerRange
@@ -101,15 +110,33 @@ namespace Pulsar.Compiler.Models
         public bool UsesTemporalConditions { get; set; }
     }
 
+    public class GeneratedSourceInfo
+    {
+        [JsonPropertyName("sourceFile")]
+        public string SourceFile { get; set; } = string.Empty;
+
+        [JsonPropertyName("lineNumber")]
+        public int LineNumber { get; set; }
+
+        [JsonPropertyName("generatedFile")]
+        public string GeneratedFile { get; set; } = string.Empty;
+
+        [JsonPropertyName("generatedLineStart")]
+        public int GeneratedLineStart { get; set; }
+
+        [JsonPropertyName("generatedLineEnd")]
+        public int GeneratedLineEnd { get; set; }
+    }
+
     public class ManifestGenerator
     {
         private readonly List<RuleDefinition> _rules;
-        private readonly List<(string fileName, string content)> _generatedFiles;
+        private readonly List<GeneratedFileInfo> _generatedFiles;
         private readonly Dictionary<string, RuleDefinition> _rulesByName;
 
         public ManifestGenerator(
             List<RuleDefinition> rules,
-            List<(string fileName, string content)> generatedFiles)
+            List<GeneratedFileInfo> generatedFiles)
         {
             _rules = rules;
             _generatedFiles = generatedFiles;
@@ -122,14 +149,15 @@ namespace Pulsar.Compiler.Models
             var ruleLayerMap = BuildRuleLayerMap();
 
             // Process each generated file
-            foreach (var (fileName, content) in _generatedFiles)
+            foreach (var file in _generatedFiles)
             {
                 var fileInfo = new GeneratedFileInfo
                 {
-                    FileName = fileName,
-                    FilePath = fileName, // In future, could be relative to project root
-                    Hash = ComputeHash(content),
-                    ContainedRules = ExtractContainedRules(content)
+                    FileName = file.FileName,
+                    FilePath = file.FilePath,
+                    Content = file.Content,
+                    Hash = ComputeHash(file.Content),
+                    ContainedRules = ExtractContainedRules(file.Content)
                 };
 
                 // Determine layer range for this file

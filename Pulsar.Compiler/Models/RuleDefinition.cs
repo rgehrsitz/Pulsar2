@@ -9,6 +9,8 @@ namespace Pulsar.Compiler.Models
     {
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
+        public string SourceFile { get; set; } = string.Empty;
+        public int LineNumber { get; set; }
         public ConditionGroup? Conditions { get; set; }
         public List<ActionDefinition> Actions { get; set; } = new List<ActionDefinition>();
         public SourceInfo? SourceInfo { get; set; }
