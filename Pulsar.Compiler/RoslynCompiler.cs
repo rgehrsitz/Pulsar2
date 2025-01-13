@@ -135,26 +135,66 @@ namespace Pulsar.Compiler
 
         private static CSharpCompilation CreateCompilation(
             List<SyntaxTree> syntaxTrees,
-            string outputDllPath,
+            string outputPath,
             bool debug)
         {
-            var assemblyName = Path.GetFileNameWithoutExtension(outputDllPath);
-            var references = GetMetadataReferences();
+            var assemblyName = Path.GetFileNameWithoutExtension(outputPath);
+            var references = new List<MetadataReference>
+            {
+                MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(Console).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(System.Collections.Generic.Dictionary<,>).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(System.Diagnostics.Debug).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(System.Linq.Enumerable).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(System.Runtime.CompilerServices.RuntimeHelpers).Assembly.Location)
+            };
 
-            s_logger.Debug("Creating compilation with {ReferenceCount} references and {FileCount} source files",
-                references.Count, syntaxTrees.Count);
+            // Add Pulsar.Runtime reference
+            var currentDirectory = AppContext.BaseDirectory;
+            var rootDirectory = FindSolutionRoot(currentDirectory);
+            if (rootDirectory != null)
+            {
+                var pulsarRuntimePath = Path.Combine(rootDirectory, "Pulsar.Runtime", "bin", "Debug", "net9.0", "Pulsar.Runtime.dll");
+                if (File.Exists(pulsarRuntimePath))
+                {
+                    references.Add(MetadataReference.CreateFromFile(pulsarRuntimePath));
+                    s_logger.Information("Added reference to Pulsar.Runtime: {Path}", pulsarRuntimePath);
+                }
+                else
+                {
+                    throw new FileNotFoundException($"Could not find Pulsar.Runtime.dll at {pulsarRuntimePath}. Please build the Pulsar.Runtime project first.");
+                }
+            }
+            else
+            {
+                throw new DirectoryNotFoundException("Could not find solution root directory.");
+            }
 
-            return CSharpCompilation.Create(
-                assemblyName,
-                syntaxTrees: syntaxTrees,
-                references: references,
-                options: new CSharpCompilationOptions(
-                    OutputKind.DynamicallyLinkedLibrary,
-                    optimizationLevel: debug ? OptimizationLevel.Debug : OptimizationLevel.Release,
-                    allowUnsafe: false,
-                    platform: Platform.AnyCpu
-                )
+            var options = new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                optimizationLevel: debug ? OptimizationLevel.Debug : OptimizationLevel.Release,
+                allowUnsafe: false,
+                platform: Platform.AnyCpu
             );
+
+            // Create syntax trees with proper encoding
+            var encodedTrees = syntaxTrees.Select(tree => 
+                CSharpSyntaxTree.ParseText(
+                    tree.GetText().ToString(),
+                    CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest),
+                    tree.FilePath ?? assemblyName,
+                    Encoding.UTF8
+                )
+            ).ToList();
+
+            var compilation = CSharpCompilation.Create(
+                assemblyName,
+                encodedTrees,
+                references,
+                options
+            );
+
+            return compilation;
         }
 
         private static void EmitAssembly(
@@ -163,7 +203,7 @@ namespace Pulsar.Compiler
             bool debug)
         {
             var emitOptions = new EmitOptions(
-                debugInformationFormat: debug ?
+                debugInformationFormat: debug ? 
                     DebugInformationFormat.PortablePdb :
                     DebugInformationFormat.Embedded
             );
@@ -173,7 +213,7 @@ namespace Pulsar.Compiler
             try
             {
                 using (var dllStream = new FileStream(outputDllPath, FileMode.Create))
-                using (var pdbStream = pdbPath != null ?
+                using (var pdbStream = pdbPath != null ? 
                     new FileStream(pdbPath, FileMode.Create) :
                     null)
                 {

@@ -29,6 +29,9 @@ namespace Pulsar.Compiler.Parsers
 
         private class YamlNodeDeserializer : INodeDeserializer
         {
+            private int _recursionDepth = 0;
+            private const int MaxRecursionDepth = 100;
+
             public bool Deserialize(
                 IParser parser,
                 Type expectedType,
@@ -38,24 +41,46 @@ namespace Pulsar.Compiler.Parsers
             {
                 value = null;
 
+                // Prevent stack overflow with recursion depth check
+                if (_recursionDepth > MaxRecursionDepth)
+                {
+                    throw new InvalidOperationException($"Maximum recursion depth of {MaxRecursionDepth} exceeded during YAML deserialization");
+                }
+
                 // Use the default deserializer for most types
                 if (expectedType != typeof(Rule))
                 {
                     return false;
                 }
 
-                // For Rule type, use the nested deserializer since we need parser context
-                value = nestedObjectDeserializer(parser, expectedType);
-
-                if (value is Rule rule)
+                try
                 {
-                    // Mark is a struct, so we need to handle the nullable Mark? properly
-                    if (parser.Current?.Start is Mark start)
+                    _recursionDepth++;
+                    // For Rule type, use the nested deserializer since we need parser context
+                    value = nestedObjectDeserializer(parser, expectedType);
+
+                    if (value is Rule rule)
                     {
-                        rule.LineNumber = (int)start.Line;  // Access Line as a property
-                        rule.OriginalText = start.ToString();
+                        // Store start mark before moving parser
+                        var start = parser.Current?.Start;
+                        
+                        // Mark is a struct, so we need to handle the nullable Mark? properly
+                        if (start.HasValue)
+                        {
+                            rule.LineNumber = (int)start.Value.Line;
+                            rule.OriginalText = start.Value.ToString();
+                        }
+                        return true;
                     }
-                    return true;
+                }
+                catch (YamlException)
+                {
+                    // If we get a YAML exception, return false to let other deserializers try
+                    return false;
+                }
+                finally
+                {
+                    _recursionDepth--;
                 }
 
                 return false;

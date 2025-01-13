@@ -11,164 +11,147 @@ using Pulsar.Compiler.Parsers;
 
 namespace Pulsar.Compiler.Generation
 {
+    public class RuleGroupingConfig
+    {
+        // Default values chosen based on typical C# file size guidelines
+        public int MaxRulesPerFile { get; set; } = 100;
+        public int MaxLinesPerFile { get; set; } = 1000;
+        public bool GroupParallelRules { get; set; } = true;
+    }
+
     public class CodeGenerator
     {
-        public static List<GeneratedFileInfo> GenerateCSharp(List<RuleDefinition> rules)
+        public static List<GeneratedFileInfo> GenerateCSharp(
+            List<RuleDefinition> rules,
+            RuleGroupingConfig? config = null)
         {
-            var files = new List<GeneratedFileInfo>();
+            config ??= new RuleGroupingConfig();
+            if (rules == null)
+            {
+                throw new ArgumentNullException(nameof(rules));
+            }
+
+            // Handle empty rules list by generating minimal valid code
+            if (!rules.Any())
+            {
+                return new List<GeneratedFileInfo>
+                {
+                    GenerateEmptyRulesFile()
+                };
+            }
+
             var layerMap = AssignLayers(rules);
             var rulesByLayer = GetRulesByLayer(rules, layerMap);
             var ruleSourceMap = new Dictionary<string, GeneratedSourceInfo>();
+            var files = new List<GeneratedFileInfo>();
 
-            // Generate layer files first to get line numbers
+            // Generate coordinator file
+            var coordinatorFile = GenerateCoordinatorFile(rulesByLayer);
+            files.Add(coordinatorFile);
+
+            // Generate layer files
             foreach (var layer in rulesByLayer)
             {
-                var layerFile = GenerateLayerFile(layer.Value, layer.Key);
-                
-                // Track source info for each rule in this layer
-                var lineNumber = 1; // Start after the header
-                foreach (var rule in layer.Value)
-                {
-                    var ruleInfo = new GeneratedSourceInfo
-                    {
-                        SourceFile = rule.SourceFile,
-                        LineNumber = rule.LineNumber,
-                        GeneratedFile = layerFile.FileName,
-                        GeneratedLineStart = lineNumber,
-                        GeneratedLineEnd = lineNumber + CountLinesForRule(rule)
-                    };
-                    ruleSourceMap[rule.Name] = ruleInfo;
-                    lineNumber = ruleInfo.GeneratedLineEnd + 1;
-                }
-                
+                var layerFile = GenerateRuleLayerFile(layer.Key, layer.Value);
                 files.Add(layerFile);
             }
-
-            // Generate the coordinator class with source tracking
-            var coordinatorFile = GenerateCoordinatorFile(rulesByLayer);
-            coordinatorFile.RuleSourceMap = ruleSourceMap;
-            files.Insert(0, coordinatorFile);
 
             return files;
         }
 
-        private static int CountLinesForRule(RuleDefinition rule)
+        private static GeneratedFileInfo GenerateEmptyRulesFile()
         {
-            // Estimate the number of lines this rule will generate
-            int lines = 4; // Basic overhead (rule header, debug line)
-            
-            if (rule.SourceInfo != null)
-                lines++;
-            
-            if (!string.IsNullOrEmpty(rule.Description))
-                lines++;
-
-            if (rule.Conditions != null)
-            {
-                lines += 6; // if statement, debug lines, else block
-                if (rule.Conditions.All != null)
-                    lines += rule.Conditions.All.Count * 2;
-                if (rule.Conditions.Any != null)
-                    lines += rule.Conditions.Any.Count * 2;
-            }
-
-            lines += rule.Actions.Count * 2; // Each action takes about 2 lines
-
-            return lines;
-        }
-
-        private static void WriteFileHeader(StringBuilder builder, string @namespace)
-        {
-            builder.AppendLine("using System;");
-            builder.AppendLine("using System.Collections.Generic;");
-            builder.AppendLine("using Pulsar;");
-            builder.AppendLine();
-            builder.AppendLine($"namespace {@namespace}");
+            var builder = new StringBuilder();
+            builder.AppendLine(GenerateCommonUsings());
+            builder.AppendLine("namespace Pulsar.Generated");
             builder.AppendLine("{");
             builder.AppendLine("    public partial class CompiledRules");
             builder.AppendLine("    {");
-        }
-
-        private static void WriteFileFooter(StringBuilder builder)
-        {
+            builder.AppendLine("        public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            // No rules to evaluate");
+            builder.AppendLine("        }");
             builder.AppendLine("    }");
             builder.AppendLine("}");
-        }
 
-        private static GeneratedFileInfo GenerateCoordinatorFile(
-            Dictionary<int, List<RuleDefinition>> rulesByLayer,
-            string @namespace = "Pulsar.Generated"
-        )
-        {
-            var builder = new StringBuilder();
-            WriteFileHeader(builder, @namespace);
-
-            builder.AppendLine("        public class RuleCoordinator");
-            builder.AppendLine("        {");
-            builder.AppendLine(
-                "            public void EvaluateRules(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)");
-            builder.AppendLine("            {");
-
-            // Call each layer's evaluation method in order
-            foreach (var layer in rulesByLayer.Keys.OrderBy(l => l))
-            {
-                builder.AppendLine($"                EvaluateLayer{layer}(inputs, outputs, bufferManager);");
-            }
-
-            builder.AppendLine("            }");
-            builder.AppendLine("        }");
-
-            WriteFileFooter(builder);
-            var content = builder.ToString();
             return new GeneratedFileInfo
             {
                 FileName = "RuleCoordinator.cs",
                 FilePath = "Generated/RuleCoordinator.cs",
-                Content = content,
-                Hash = ComputeHash(content),
-                Namespace = @namespace,
-                LayerRange = new RuleLayerRange
-                {
-                    Start = rulesByLayer.Keys.Min(),
-                    End = rulesByLayer.Keys.Max()
-                }
+                Content = builder.ToString(),
+                Hash = ComputeHash(builder.ToString()),
+                Namespace = "Pulsar.Generated",
+                LayerRange = new RuleLayerRange { Start = 0, End = 0 },
+                ContainedRules = new List<string>()
             };
         }
 
-        private static GeneratedFileInfo GenerateLayerFile(
-            List<RuleDefinition> rules, 
-            int layer,
-            string @namespace = "Pulsar.Generated"
-        )
+        private static GeneratedFileInfo GenerateCoordinatorFile(Dictionary<int, List<RuleDefinition>> rulesByLayer)
         {
             var builder = new StringBuilder();
-            WriteFileHeader(builder, @namespace);
+            builder.AppendLine(GenerateCommonUsings());
+            builder.AppendLine("namespace Pulsar.Generated");
+            builder.AppendLine("{");
+            builder.AppendLine("    public partial class CompiledRules");
+            builder.AppendLine("    {");
+            builder.AppendLine("        public void Evaluate(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)");
+            builder.AppendLine("        {");
 
-            // Generate the layer class
+            // Call each layer's evaluation method in order
+            foreach (var layer in rulesByLayer.Keys.OrderBy(k => k))
+            {
+                builder.AppendLine($"            EvaluateLayer{layer}(inputs, outputs, bufferManager);");
+            }
+
+            builder.AppendLine("        }");
+            builder.AppendLine("    }");
+            builder.AppendLine("}");
+
+            return new GeneratedFileInfo
+            {
+                FileName = "RuleCoordinator.cs",
+                FilePath = "Generated/RuleCoordinator.cs",
+                Content = builder.ToString(),
+                Hash = ComputeHash(builder.ToString()),
+                Namespace = "Pulsar.Generated",
+                LayerRange = new RuleLayerRange { Start = 0, End = rulesByLayer.Keys.Max() },
+                ContainedRules = new List<string>()
+            };
+        }
+
+        private static GeneratedFileInfo GenerateRuleLayerFile(int layer, List<RuleDefinition> rules)
+        {
+            var builder = new StringBuilder();
+            builder.AppendLine(GenerateCommonUsings());
+            builder.AppendLine("namespace Pulsar.Generated");
+            builder.AppendLine("{");
+            builder.AppendLine("    public partial class CompiledRules");
+            builder.AppendLine("    {");
             builder.AppendLine($"        private void EvaluateLayer{layer}(Dictionary<string, double> inputs, Dictionary<string, double> outputs, RingBufferManager bufferManager)");
             builder.AppendLine("        {");
 
             foreach (var rule in rules)
             {
-                GenerateRuleMethod(builder, rule);
+                GenerateRuleEvaluation(builder, rule);
             }
 
             builder.AppendLine("        }");
+            builder.AppendLine("    }");
+            builder.AppendLine("}");
 
-            WriteFileFooter(builder);
-            var content = builder.ToString();
             return new GeneratedFileInfo
             {
-                FileName = $"RuleGroup_{layer}.cs",
-                FilePath = $"Generated/RuleGroup_{layer}.cs",
-                Content = content,
-                Hash = ComputeHash(content),
-                Namespace = @namespace,
-                LayerRange = new RuleLayerRange { Start = layer, End = layer }
+                FileName = $"RuleLayer{layer}.cs",
+                FilePath = $"Generated/RuleLayer{layer}.cs",
+                Content = builder.ToString(),
+                Hash = ComputeHash(builder.ToString()),
+                Namespace = "Pulsar.Generated",
+                LayerRange = new RuleLayerRange { Start = layer, End = layer },
+                ContainedRules = rules.Select(r => r.Name).ToList()
             };
         }
 
-        private static void GenerateRuleMethod(StringBuilder builder, RuleDefinition rule)
+        private static void GenerateRuleEvaluation(StringBuilder builder, RuleDefinition rule)
         {
             // Add source tracing comment with file info
             builder.AppendLine($"        // Rule: {rule.Name}");
@@ -192,6 +175,7 @@ namespace Pulsar.Compiler.Generation
             {
                 // Rest of the existing condition and action generation code remains the same
                 var escapedCondition = condition.Replace("\"", "\\\"");
+
                 builder.AppendLine(
                     $"        System.Diagnostics.Debug.WriteLine(\"Checking condition: {escapedCondition}\");"
                 );
@@ -241,6 +225,7 @@ namespace Pulsar.Compiler.Generation
 
                 // Properly escape quotation marks for debug output
                 var escapedAssignment = valueAssignment.Replace("\"", "\\\"");
+
                 builder.AppendLine(
                     $"            System.Diagnostics.Debug.WriteLine(\"Setting {action.Key} to {escapedAssignment}\");"
                 );
@@ -367,7 +352,7 @@ namespace Pulsar.Compiler.Generation
 
                     if (condition is ComparisonCondition comp)
                     {
-                        conditionStr = $"{comp.Sensor} {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                        conditionStr = $"inputs[\"{comp.Sensor}\"] {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
                     }
                     else if (condition is ThresholdOverTimeCondition temporal)
                     {
@@ -377,15 +362,6 @@ namespace Pulsar.Compiler.Generation
                     else if (condition is ExpressionCondition expr)
                     {
                         conditionStr = FixupExpression(expr.Expression);
-                    }
-                    else if (condition is ConditionGroup group)
-                    {
-                        conditionStr = GenerateCondition(group);
-                        // Always parenthesize nested group results
-                        if (!string.IsNullOrEmpty(conditionStr))
-                        {
-                            conditionStr = $"({conditionStr})";
-                        }
                     }
 
                     if (!string.IsNullOrEmpty(conditionStr))
@@ -397,11 +373,6 @@ namespace Pulsar.Compiler.Generation
                 if (allConditions.Any())
                 {
                     result = string.Join(" && ", allConditions);
-                    // Parenthesize ALL group if it's nested and contains multiple conditions
-                    if (conditions.Parent != null && allConditions.Count > 1)
-                    {
-                        result = $"({result})";
-                    }
                 }
             }
 
@@ -415,7 +386,7 @@ namespace Pulsar.Compiler.Generation
 
                     if (condition is ComparisonCondition comp)
                     {
-                        conditionStr = $"{comp.Sensor} {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                        conditionStr = $"inputs[\"{comp.Sensor}\"] {GetOperator(comp.Operator)} {comp.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
                     }
                     else if (condition is ThresholdOverTimeCondition temporal)
                     {
@@ -425,15 +396,6 @@ namespace Pulsar.Compiler.Generation
                     else if (condition is ExpressionCondition expr)
                     {
                         conditionStr = FixupExpression(expr.Expression);
-                    }
-                    else if (condition is ConditionGroup group)
-                    {
-                        conditionStr = GenerateCondition(group);
-                        // Always parenthesize nested group results within ANY
-                        if (!string.IsNullOrEmpty(conditionStr))
-                        {
-                            conditionStr = $"({conditionStr})";
-                        }
                     }
 
                     if (!string.IsNullOrEmpty(conditionStr))
@@ -445,12 +407,7 @@ namespace Pulsar.Compiler.Generation
                 if (anyConditions.Any())
                 {
                     var anyPart = string.Join(" || ", anyConditions);
-                    // Always parenthesize ANY groups that are part of a larger condition
-                    if (result.Length > 0 || conditions.Parent != null)
-                    {
-                        anyPart = $"({anyPart})";
-                    }
-                    result = result.Length > 0 ? $"{result} && {anyPart}" : anyPart;
+                    result = result.Length > 0 ? $"{result} && ({anyPart})" : anyPart;
                 }
             }
 
@@ -481,35 +438,47 @@ namespace Pulsar.Compiler.Generation
             };
         }
 
-        public static string FixupExpression(string expression)
+        internal static string FixupExpression(string expression)
         {
-            // Replace any unsupported operators or functions with C# equivalents
-            expression = expression.Replace("^", "Math.Pow");
-            expression = expression.Replace("sqrt", "Math.Sqrt");
-            expression = expression.Replace("abs", "Math.Abs");
-            expression = expression.Replace("sin", "Math.Sin");
-            expression = expression.Replace("cos", "Math.Cos");
-            expression = expression.Replace("tan", "Math.Tan");
-            expression = expression.Replace("log", "Math.Log");
-            expression = expression.Replace("exp", "Math.Exp");
-            expression = expression.Replace("floor", "Math.Floor");
-            expression = expression.Replace("ceil", "Math.Ceiling");
-            expression = expression.Replace("round", "Math.Round");
-
-            // Handle power operator special case (a^b -> Math.Pow(a,b))
-            var powerRegex = new Regex(@"Math\.Pow\(([^,]+)\)");
-            expression = powerRegex.Replace(expression, match =>
+            if (string.IsNullOrEmpty(expression))
             {
-                var arg = match.Groups[1].Value;
-                var parts = arg.Split('^');
-                if (parts.Length == 2)
-                {
-                    return $"Math.Pow({parts[0].Trim()}, {parts[1].Trim()})";
-                }
-                return match.Value;
-            });
+                return expression;
+            }
 
-            return expression;
+            // List of Math functions to preserve
+            var mathFunctions = new[]
+            {
+                "Math.Abs", "Math.Pow", "Math.Sqrt", "Math.Sin", "Math.Cos", "Math.Tan",
+                "Math.Log", "Math.Exp", "Math.Floor", "Math.Ceiling", "Math.Round"
+            };
+
+            // First handle Math function calls
+            foreach (var func in mathFunctions)
+            {
+                expression = expression.Replace(func.ToLower(), func);
+            }
+
+            // Wrap variable references in inputs[] dictionary access
+            var wrappedExpression = Regex.Replace(
+                expression,
+                @"\b(?!Math\.)([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\[|\()",
+                "inputs[\"$1\"]"
+            );
+
+            // Replace power operator with Math.Pow
+            wrappedExpression = Regex.Replace(
+                wrappedExpression,
+                @"(\w+|\))\s*\^(\s*\w+|\s*\d+(\.\d+)?|\s*\()",
+                "Math.Pow($1,$2)"
+            );
+
+            // Add parentheses around complex expressions
+            if (wrappedExpression.Contains(" ") || wrappedExpression.Contains("("))
+            {
+                wrappedExpression = $"({wrappedExpression})";
+            }
+
+            return wrappedExpression;
         }
 
         private static string ComputeHash(string content)
@@ -518,6 +487,17 @@ namespace Pulsar.Compiler.Generation
             var bytes = System.Text.Encoding.UTF8.GetBytes(content);
             var hash = sha.ComputeHash(bytes);
             return Convert.ToBase64String(hash);
+        }
+
+        private static string GenerateCommonUsings()
+        {
+            return @"using System;
+using System.Collections.Generic;
+using System.Linq;
+using Pulsar.Runtime;
+using Pulsar.Runtime.Common;
+using Pulsar.Runtime.Buffers;
+";
         }
     }
 }

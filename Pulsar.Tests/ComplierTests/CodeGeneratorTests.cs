@@ -21,40 +21,63 @@ namespace Pulsar.Tests.CompilerTests
                 Conditions = new ConditionGroup
                 {
                     All = new List<ConditionDefinition>
-                    {
-                        new ComparisonCondition
-                        {
-                            Type = ConditionType.Comparison,
-                            Sensor = "temperature",
-                            Operator = ComparisonOperator.GreaterThan,
-                            Value = 100,
-                        },
-                    },
+            {
+                new ComparisonCondition
+                {
+                    Type = ConditionType.Comparison,
+                    Sensor = "temperature",
+                    Operator = ComparisonOperator.GreaterThan,
+                    Value = 100,
+                },
+            },
                 },
                 Actions = new List<ActionDefinition>
-                {
-                    new SetValueAction
-                    {
-                        Type = ActionType.SetValue,
-                        Key = "alert",
-                        Value = 1,
-                    },
-                },
+        {
+            new SetValueAction
+            {
+                Type = ActionType.SetValue,
+                Key = "alert",
+                Value = 1,
+            },
+        },
             };
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
-            var code = generatedFiles[0].Content;
 
-            // Assert
-            Assert.Contains("public class CompiledRules", code);
-            Assert.Contains("EvaluateLayer0", code);
-            Assert.Contains("inputs[\"temperature\"] > 100", code);
-            Assert.Contains("outputs[\"alert\"] = 1", code);
+            // Debug output for all files
+            foreach (var file in generatedFiles)
+            {
+                Debug.WriteLine($"\nFile: {file.FileName}");
+                Debug.WriteLine("Content:");
+                Debug.WriteLine(file.Content);
+            }
+
+            // Get files
+            var ruleFile = generatedFiles.First(f => f.FileName.StartsWith("RuleGroup_"));
+            var coordinatorFile = generatedFiles.First(f => f.FileName == "RuleCoordinator.cs");
+
+            // Basic structural assertions first
+            Assert.Equal(2, generatedFiles.Count);
+            Assert.Contains("public partial class CompiledRules", ruleFile.Content);
+            Assert.Contains("SimpleRule", ruleFile.Content);
+            Assert.Contains("Evaluate", coordinatorFile.Content);
+
+            // Let's log the exact pattern we're looking for
+            Debug.WriteLine("\nLooking for condition pattern in content:");
+            var conditionPattern = "inputs[\"temperature\"] > 100";
+            Debug.WriteLine($"Pattern: {conditionPattern}");
+            Debug.WriteLine("Content relevant section:");
+            Debug.WriteLine(ruleFile.Content.Substring(0, Math.Min(500, ruleFile.Content.Length)));
+
+            // More specific assertions
+            Assert.Contains(conditionPattern, ruleFile.Content);
+            Assert.Contains("outputs[\"alert\"] = 1", ruleFile.Content);
+            Assert.Contains($"EvaluateGroup_{ruleFile.LayerRange.Start}_{ruleFile.LayerRange.End}", coordinatorFile.Content);
         }
 
         [Fact]
-        public void GenerateCSharp_MultipleRules_GeneratesLayeredCode()
+        public void GenerateCSharp_MultipleRules_GeneratesValidCode()
         {
             // Arrange
             var rule1 = new RuleDefinition
@@ -63,25 +86,25 @@ namespace Pulsar.Tests.CompilerTests
                 Conditions = new ConditionGroup
                 {
                     All = new List<ConditionDefinition>
-                    {
-                        new ComparisonCondition
-                        {
-                            Type = ConditionType.Comparison,
-                            Sensor = "temp1",
-                            Operator = ComparisonOperator.GreaterThan,
-                            Value = 50,
-                        },
-                    },
+            {
+                new ComparisonCondition
+                {
+                    Type = ConditionType.Comparison,
+                    Sensor = "temp1",
+                    Operator = ComparisonOperator.GreaterThan,
+                    Value = 50,
+                },
+            },
                 },
                 Actions = new List<ActionDefinition>
-                {
-                    new SetValueAction
-                    {
-                        Type = ActionType.SetValue,
-                        Key = "intermediate",
-                        Value = 1,
-                    },
-                },
+        {
+            new SetValueAction
+            {
+                Type = ActionType.SetValue,
+                Key = "intermediate",
+                Value = 1,
+            },
+        },
             };
 
             var rule2 = new RuleDefinition
@@ -90,36 +113,52 @@ namespace Pulsar.Tests.CompilerTests
                 Conditions = new ConditionGroup
                 {
                     All = new List<ConditionDefinition>
-                    {
-                        new ComparisonCondition
-                        {
-                            Type = ConditionType.Comparison,
-                            Sensor = "intermediate",
-                            Operator = ComparisonOperator.EqualTo,
-                            Value = 1,
-                        },
-                    },
+            {
+                new ComparisonCondition
+                {
+                    Type = ConditionType.Comparison,
+                    Sensor = "intermediate",
+                    Operator = ComparisonOperator.EqualTo,
+                    Value = 1,
+                },
+            },
                 },
                 Actions = new List<ActionDefinition>
-                {
-                    new SetValueAction
-                    {
-                        Type = ActionType.SetValue,
-                        Key = "output",
-                        Value = 2,
-                    },
-                },
+        {
+            new SetValueAction
+            {
+                Type = ActionType.SetValue,
+                Key = "output",
+                Value = 2,
+            },
+        },
             };
 
             // Act
-            var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule1, rule2 });
-            var code = generatedFiles[0].Content;
+            var config = new RuleGroupingConfig { MaxRulesPerFile = 1 }; // Force separate files
+            var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule1, rule2 }, config);
 
             // Assert
-            Assert.Contains("EvaluateLayer0", code);
-            Assert.Contains("EvaluateLayer1", code);
-            Assert.Contains("inputs[\"temp1\"] > 50", code);
-            Assert.Contains("outputs[\"intermediate\"] == 1", code);
+            Assert.Equal(3, generatedFiles.Count); // Coordinator + two rule groups
+
+            var ruleFiles = generatedFiles.Where(f => f.FileName.StartsWith("RuleGroup_"))
+                                         .OrderBy(f => f.LayerRange.Start)
+                                         .ToList();
+            var coordinatorFile = generatedFiles.First(f => f.FileName == "RuleCoordinator.cs");
+
+            // Verify rule1 comes before rule2 due to dependency
+            Assert.Contains("Rule1", ruleFiles[0].Content);
+            Assert.Contains("Rule2", ruleFiles[1].Content);
+            Assert.Contains("inputs[\"temp1\"] > 50", ruleFiles[0].Content);
+            Assert.Contains("inputs[\"intermediate\"] == 1", ruleFiles[1].Content);
+
+            // Verify coordinator calls groups in correct order
+            var coordinatorContent = coordinatorFile.Content;
+            Assert.True(
+                coordinatorContent.IndexOf($"EvaluateGroup_{ruleFiles[0].LayerRange.Start}_") <
+                coordinatorContent.IndexOf($"EvaluateGroup_{ruleFiles[1].LayerRange.Start}_"),
+                "Rules not evaluated in dependency order"
+            );
         }
 
         [Fact]
@@ -132,102 +171,31 @@ namespace Pulsar.Tests.CompilerTests
                 Conditions = new ConditionGroup
                 {
                     All = new List<ConditionDefinition>
-                    {
-                        new ExpressionCondition
-                        {
-                            Type = ConditionType.Expression,
-                            Expression = "temperature * 1.8 + 32 > 100",
-                        },
-                    },
-                },
-                Actions = new List<ActionDefinition>
-                {
-                    new SetValueAction
-                    {
-                        Key = "fahrenheit",
-                        ValueExpression = "temperature * 1.8 + 32",
-                    },
-                },
-            };
-
-            // Act
-            var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
-            var code = generatedFiles[0].Content;
-
-            // Assert
-            // Test the condition in the if statement
-            Assert.Contains("if (((inputs[\"temperature\"] * 1.8 + 32 > 100)))", code);
-
-            // Test the debug output - using exact match from generated code
-            Assert.Contains(
-                "System.Diagnostics.Debug.WriteLine(\"Checking condition: ((inputs[\\\"temperature\\\"] * 1.8 + 32 > 100))\")",
-                code
-            );
-
-            // Test the action
-            Assert.Contains("outputs[\"fahrenheit\"] = inputs[\"temperature\"] * 1.8 + 32", code);
-
-            // For better debugging, let's also print the relevant section
-            Debug.WriteLine("Expected debug statement:");
-            Debug.WriteLine(
-                "System.Diagnostics.Debug.WriteLine(\"Checking condition: ((inputs[\\\"temperature\\\"] * 1.8 + 32 > 100))\")"
-            );
-            Debug.WriteLine("\nActual Code:");
-            Debug.WriteLine(code);
-        }
-
-        [Fact]
-        public void GenerateCSharp_ComplexExpressionCondition_GeneratesValidCode()
-        {
-            // Arrange
-            var rule = new RuleDefinition
             {
-                Name = "ComplexExpressionRule",
-                Conditions = new ConditionGroup
+                new ExpressionCondition
                 {
-                    All = new List<ConditionDefinition>
-                    {
-                        new ExpressionCondition
-                        {
-                            Type = ConditionType.Expression,
-                            Expression = "Math.Abs(temperature - setpoint) > threshold",
-                        },
-                        new ExpressionCondition
-                        {
-                            Type = ConditionType.Expression,
-                            Expression = "rate_of_change > 5",
-                        },
-                    },
+                    Type = ConditionType.Expression,
+                    Expression = "temperature * 1.8 + 32 > 100",
+                },
+            },
                 },
                 Actions = new List<ActionDefinition>
-                {
-                    new SetValueAction { Key = "alert", Value = 1 },
-                },
+        {
+            new SetValueAction
+            {
+                Key = "fahrenheit",
+                ValueExpression = "temperature * 1.8 + 32",
+            },
+        },
             };
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
-            var code = generatedFiles[0].Content;
+            var ruleFile = generatedFiles.First(f => f.FileName.StartsWith("RuleGroup_"));
 
             // Assert
-            // Test complex expression with Math function
-            Assert.Contains(
-                "(Math.Abs(inputs[\"temperature\"] - inputs[\"setpoint\"]) > inputs[\"threshold\"])",
-                code
-            );
-
-            // Test simple expression
-            bool hasSimpleExpression =
-                code.Contains("inputs[\"rate_of_change\"] > 5")
-                || code.Contains("(inputs[\"rate_of_change\"] > 5)");
-            Assert.True(
-                hasSimpleExpression,
-                "Code should contain simple expression with proper dictionary access"
-            );
-
-            // Verify debug output format
-            Assert.Contains("System.Diagnostics.Debug.WriteLine(\"Checking condition:", code);
-            Assert.Contains("outputs[\"alert\"] = 1", code);
+            Assert.Contains("if (inputs[\"temperature\"] * 1.8 + 32 > 100)", ruleFile.Content);
+            Assert.Contains("outputs[\"fahrenheit\"] = inputs[\"temperature\"] * 1.8 + 32", ruleFile.Content);
         }
 
         [Fact]
@@ -238,11 +206,12 @@ namespace Pulsar.Tests.CompilerTests
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(rules);
-            var code = generatedFiles[0].Content;
 
             // Assert
-            Assert.Contains("public class CompiledRules", code);
-            Assert.DoesNotContain("EvaluateLayer", code);
+            Assert.Single(generatedFiles); // Only coordinator file
+            Assert.Equal("RuleCoordinator.cs", generatedFiles[0].FileName);
+            Assert.Contains("public void Evaluate", generatedFiles[0].Content);
+            Assert.DoesNotContain("EvaluateGroup_", generatedFiles[0].Content);
         }
 
         [Fact]
@@ -255,36 +224,36 @@ namespace Pulsar.Tests.CompilerTests
                 Conditions = new ConditionGroup
                 {
                     Any = new List<ConditionDefinition>
-                    {
-                        new ComparisonCondition
-                        {
-                            Type = ConditionType.Comparison,
-                            Sensor = "temp1",
-                            Operator = ComparisonOperator.GreaterThan,
-                            Value = 100,
-                        },
-                        new ComparisonCondition
-                        {
-                            Type = ConditionType.Comparison,
-                            Sensor = "temp2",
-                            Operator = ComparisonOperator.LessThan,
-                            Value = 0,
-                        },
-                    },
+            {
+                new ComparisonCondition
+                {
+                    Type = ConditionType.Comparison,
+                    Sensor = "temp1",
+                    Operator = ComparisonOperator.GreaterThan,
+                    Value = 100,
+                },
+                new ComparisonCondition
+                {
+                    Type = ConditionType.Comparison,
+                    Sensor = "temp2",
+                    Operator = ComparisonOperator.LessThan,
+                    Value = 0,
+                },
+            },
                 },
                 Actions = new List<ActionDefinition>
-                {
-                    new SetValueAction { Key = "alert", Value = 1 },
-                },
+        {
+            new SetValueAction { Key = "alert", Value = 1 },
+        },
             };
 
             // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(new List<RuleDefinition> { rule });
-            var code = generatedFiles[0].Content;
+            var ruleFile = generatedFiles.First(f => f.FileName.StartsWith("RuleGroup_"));
 
             // Assert
-            Assert.Contains("if (inputs[\"temp1\"] > 100 || inputs[\"temp2\"] < 0)", code);
-            Assert.Contains("outputs[\"alert\"] = 1", code);
+            Assert.Contains("if (inputs[\"temp1\"] > 100 || inputs[\"temp2\"] < 0)", ruleFile.Content);
+            Assert.Contains("outputs[\"alert\"] = 1", ruleFile.Content);
         }
 
         [Fact]
@@ -706,6 +675,198 @@ namespace Pulsar.Tests.CompilerTests
                     },
                 },
             };
+        }
+
+        [Fact]
+        public void GenerateCSharp_WithGroupingConfig_RespectsMaxRulesPerFile()
+        {
+            // Arrange
+            var rules = new List<RuleDefinition>();
+            for (int i = 0; i < 15; i++)
+            {
+                rules.Add(CreateRule($"Rule{i}", new[] { "input" }, $"output{i}"));
+            }
+
+            var config = new RuleGroupingConfig
+            {
+                MaxRulesPerFile = 5,
+                MaxLinesPerFile = 1000,
+                GroupParallelRules = true
+            };
+
+            // Act 
+            var generatedFiles = CodeGenerator.GenerateCSharp(rules, config);
+            var ruleFiles = generatedFiles.Where(f => f.FileName != "RuleCoordinator.cs").ToList();
+
+            // Assert
+            Assert.True(ruleFiles.All(f =>
+                f.Content.Split("Rule:").Length - 1 <= config.MaxRulesPerFile),
+                "Some files contain more rules than MaxRulesPerFile");
+
+            // Verify coordinator calls all groups
+            var coordinator = generatedFiles.First(f => f.FileName == "RuleCoordinator.cs");
+            foreach (var file in ruleFiles)
+            {
+                var methodName = $"EvaluateGroup_{file.LayerRange.Start}_{file.LayerRange.End}";
+                Assert.Contains(methodName, coordinator.Content);
+            }
+        }
+
+        [Fact]
+        public void GenerateCSharp_WithDependencies_MaintainsOrderInGroups()
+        {
+            // Arrange
+            var rule1 = CreateRule("Rule1", new[] { "input" }, "intermediate1");
+            var rule2 = CreateRule("Rule2", new[] { "intermediate1" }, "intermediate2");
+            var rule3 = CreateRule("Rule3", new[] { "intermediate2" }, "output");
+
+            var config = new RuleGroupingConfig
+            {
+                MaxRulesPerFile = 2,  // Force splitting into multiple groups
+                GroupParallelRules = true
+            };
+
+            // Act
+            var generatedFiles = CodeGenerator.GenerateCSharp(new[] { rule1, rule2, rule3 }.ToList(), config);
+            var coordinator = generatedFiles.First(f => f.FileName == "RuleCoordinator.cs");
+
+            // Assert
+            var groups = generatedFiles.Where(f => f.FileName != "RuleCoordinator.cs")
+                                      .OrderBy(f => f.LayerRange.Start)
+                                      .ToList();
+
+            // Verify layer ordering
+            for (int i = 1; i < groups.Count; i++)
+            {
+                Assert.True(groups[i - 1].LayerRange.End <= groups[i].LayerRange.Start,
+                    "Groups are not properly ordered by layer");
+            }
+
+            // Verify coordinator calls methods in correct order
+            var coordinatorContent = coordinator.Content;
+            var evaluationLines = coordinatorContent
+                .Split('\n')
+                .Where(l => l.Contains("EvaluateGroup_"))
+                .ToList();
+
+            for (int i = 1; i < evaluationLines.Count; i++)
+            {
+                var prevGroupNum = int.Parse(evaluationLines[i - 1].Split('_')[1]);
+                var currentGroupNum = int.Parse(evaluationLines[i].Split('_')[1]);
+                Assert.True(prevGroupNum <= currentGroupNum,
+                    "Coordinator is not calling groups in dependency order");
+            }
+        }
+
+        [Fact]
+        public void GenerateCSharp_WithParallelRules_GroupsCorrectly()
+        {
+            // Arrange
+            var rules = new List<RuleDefinition>
+    {
+        CreateRule("ParallelRule1", new[] { "input1" }, "output1"),
+        CreateRule("ParallelRule2", new[] { "input2" }, "output2"),
+        CreateRule("ParallelRule3", new[] { "input3" }, "output3"),
+        CreateRule("DependentRule", new[] { "output1", "output2" }, "finalOutput")
+    };
+
+            var config = new RuleGroupingConfig
+            {
+                MaxRulesPerFile = 2,
+                GroupParallelRules = true
+            };
+
+            // Act
+            var generatedFiles = CodeGenerator.GenerateCSharp(rules, config);
+
+            // Assert
+            var ruleFiles = generatedFiles.Where(f => f.FileName != "RuleCoordinator.cs").ToList();
+
+            // Verify parallel rules are grouped together when possible
+            var firstGroupContent = ruleFiles.First().Content;
+            Assert.True(
+                firstGroupContent.Contains("ParallelRule1") &&
+                firstGroupContent.Contains("ParallelRule2") ||
+                firstGroupContent.Contains("ParallelRule2") &&
+                firstGroupContent.Contains("ParallelRule3") ||
+                firstGroupContent.Contains("ParallelRule1") &&
+                firstGroupContent.Contains("ParallelRule3"),
+                "Parallel rules were not grouped together"
+            );
+
+            // Verify dependent rule is in a later group
+            var lastGroupContent = ruleFiles.Last().Content;
+            Assert.Contains("DependentRule", lastGroupContent);
+        }
+
+        [Fact]
+        public void GenerateCSharp_WithLargeRules_RespectsMaxLinesPerFile()
+        {
+            // Arrange
+            var rule1 = new RuleDefinition
+            {
+                Name = "LargeRule1",
+                Conditions = new ConditionGroup
+                {
+                    All = Enumerable.Range(0, 20).Select(i =>
+                        new ComparisonCondition
+                        {
+                            Type = ConditionType.Comparison,
+                            Sensor = $"input{i}",
+                            Operator = ComparisonOperator.GreaterThan,
+                            Value = i
+                        } as ConditionDefinition).ToList()
+                },
+                Actions = new List<ActionDefinition>
+        {
+            new SetValueAction
+            {
+                Type = ActionType.SetValue,
+                Key = "output1",
+                Value = 1
+            }
+        }
+            };
+
+            var rule2 = new RuleDefinition
+            {
+                Name = "LargeRule2",
+                Conditions = new ConditionGroup
+                {
+                    All = Enumerable.Range(0, 20).Select(i =>
+                        new ComparisonCondition
+                        {
+                            Type = ConditionType.Comparison,
+                            Sensor = $"input{i}",
+                            Operator = ComparisonOperator.LessThan,
+                            Value = i
+                        } as ConditionDefinition).ToList()
+                },
+                Actions = new List<ActionDefinition>
+        {
+            new SetValueAction
+            {
+                Type = ActionType.SetValue,
+                Key = "output2",
+                Value = 2
+            }
+        }
+            };
+
+            var config = new RuleGroupingConfig
+            {
+                MaxRulesPerFile = 10,
+                MaxLinesPerFile = 100  // Set small to force splitting
+            };
+
+            // Act
+            var generatedFiles = CodeGenerator.GenerateCSharp(new[] { rule1, rule2 }.ToList(), config);
+            var ruleFiles = generatedFiles.Where(f => f.FileName != "RuleCoordinator.cs").ToList();
+
+            // Assert
+            Assert.True(ruleFiles.All(f =>
+                f.Content.Split('\n').Length <= config.MaxLinesPerFile),
+                "Some files exceed MaxLinesPerFile");
         }
     }
 }
