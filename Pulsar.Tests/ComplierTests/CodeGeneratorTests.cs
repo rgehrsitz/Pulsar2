@@ -1,3 +1,5 @@
+// File: Pulsar.Tests/ComplierTests/CodeGeneratorTests.cs
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -694,7 +696,7 @@ namespace Pulsar.Tests.CompilerTests
                 GroupParallelRules = true
             };
 
-            // Act 
+            // Act
             var generatedFiles = CodeGenerator.GenerateCSharp(rules, config);
             var ruleFiles = generatedFiles.Where(f => f.FileName != "RuleCoordinator.cs").ToList();
 

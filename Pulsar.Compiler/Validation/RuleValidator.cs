@@ -1,3 +1,5 @@
+// File: Pulsar.Compiler/Validation/RuleValidator.cs
+
 // public void ValidateTemporalRules(List<RuleDefinition> rules)
 // {
 //     const double MINIMUM_MEANINGFUL_DURATION_MS = 100; // Configurable threshold

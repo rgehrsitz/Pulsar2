@@ -1,3 +1,5 @@
+// File: Pulsar.Tests/CodeGeneratorTests.cs
+
 using System;
 using System.Collections.Generic;
 using System.Linq;

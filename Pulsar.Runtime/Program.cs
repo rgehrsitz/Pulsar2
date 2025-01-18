@@ -1,2 +1,3 @@
-﻿// See https://aka.ms/new-console-template for more information
+﻿// File: Pulsar.Runtime/Program.cs
+
 Console.WriteLine("Hello, World!");

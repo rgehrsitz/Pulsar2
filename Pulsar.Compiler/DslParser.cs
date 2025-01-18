@@ -1,4 +1,4 @@
-// File: Pulsar.Compiler/Parsers/DslParser.cs
+// File: Pulsar.Compiler/DslParser.cs
 
 using System;
 using System.Collections.Generic;
@@ -63,7 +63,7 @@ namespace Pulsar.Compiler.Parsers
                     {
                         // Store start mark before moving parser
                         var start = parser.Current?.Start;
-                        
+
                         // Mark is a struct, so we need to handle the nullable Mark? properly
                         if (start.HasValue)
                         {

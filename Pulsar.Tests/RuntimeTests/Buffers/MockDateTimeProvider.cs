@@ -1,4 +1,4 @@
-// File: Pulsar.Runtime.Tests/Buffers/MockDateTimeProvider.cs
+// File: Pulsar.Tests/RuntimeTests/Buffers/MockDateTimeProvider.cs
 
 using Pulsar.Runtime.Buffers;
 using System;

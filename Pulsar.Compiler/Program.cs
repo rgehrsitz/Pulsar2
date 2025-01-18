@@ -47,9 +47,17 @@ namespace Pulsar.Compiler
 
                 return 0;
             }
+            catch (ArgumentException ex)
+            {
+                logger.Error(ex, "Invalid arguments provided");
+                Console.WriteLine($"Error: {ex.Message}");
+                PrintUsage();
+                return 1;
+            }
             catch (Exception ex)
             {
                 logger.Error(ex, "An error occurred while executing the command");
+                Console.WriteLine("An unexpected error occurred. Please check the logs for more details.");
                 return 1;
             }
         }
@@ -105,6 +113,7 @@ namespace Pulsar.Compiler
             );
 
             logger.Information("Successfully validated {count} rules", ruleDefinitions.Count);
+            Console.WriteLine("Validation successful. All rules are valid.");
         }
 
         private static async Task GenerateSources(Dictionary<string, string> options, ILogger logger)
@@ -140,6 +149,7 @@ namespace Pulsar.Compiler
             }
 
             logger.Information("Successfully generated {count} source files", codeFiles.Count);
+            Console.WriteLine("Source generation successful. Files have been written to the output directory.");
         }
 
 

@@ -1,5 +1,4 @@
-// File: Pulsar.Compiler/Validation/ExpressionValidator.cs
-
+// File: Pulsar.Compiler/ExpressionValidator.cs
 using System;
 using System.Collections.Generic;
 using System.Linq;
