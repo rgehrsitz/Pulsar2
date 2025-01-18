@@ -290,10 +290,12 @@ public class CircularBuffer
 /// <summary>
 /// Manages ring buffers for multiple sensors
 /// </summary>
-public class RingBufferManager
+public class RingBufferManager : IDisposable
 {
     public readonly ConcurrentDictionary<string, CircularBuffer> _buffers;
     private readonly int _capacity;
+    private readonly IDateTimeProvider _dateTimeProvider;
+    private bool _disposed;
 
     public RingBufferManager(int capacity = 100, IDateTimeProvider dateTimeProvider = null)
     {
@@ -301,8 +303,6 @@ public class RingBufferManager
         _buffers = new ConcurrentDictionary<string, CircularBuffer>();
         _dateTimeProvider = dateTimeProvider ?? new SystemDateTimeProvider();
     }
-
-    private readonly IDateTimeProvider _dateTimeProvider;
 
     public void UpdateBuffer(string sensor, double value, DateTime timestamp)
     {
@@ -334,5 +334,14 @@ public class RingBufferManager
     public void Clear()
     {
         _buffers.Clear();
+    }
+
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            Clear();
+            _disposed = true;
+        }
     }
 }
