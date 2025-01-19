@@ -4,6 +4,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using Pulsar.Compiler.Exceptions;
 using Pulsar.Compiler.Models;
 using Pulsar.Compiler.Parsers;
 using Xunit;
@@ -155,35 +157,6 @@ rules:
     }
 
     [Fact]
-    public void ParseRules_ShouldHandleEmptyConditions()
-    {
-      // Arrange
-      string yamlContent =
-          @"
-rules:
-  - name: 'NoConditionRule'
-    conditions:
-      all: []
-    actions:
-      - set_value:
-          key: 'temp_key'
-          value_expression: 'temperature_f * 1.8 + 32'
-";
-      var validSensors = new List<string> { "temperature_f", "temp_key" };
-
-      // Act
-      var rules = _parser.ParseRules(yamlContent, validSensors);
-
-      // Assert
-      Assert.Single(rules);
-      Assert.NotNull(rules[0].Conditions);
-      Assert.NotNull(rules[0].Conditions.All);
-      Assert.Empty(rules[0].Conditions.All);
-      Assert.NotNull(rules[0].Actions);
-      Assert.Single(rules[0].Actions);
-    }
-
-    [Fact]
     public void ParseRules_ShouldHandleEmptyActions()
     {
       // Arrange
@@ -209,9 +182,9 @@ rules:
       Assert.Single(rules);
       Assert.NotNull(rules[0].Conditions);
       Assert.NotNull(rules[0].Conditions.All);
-      Assert.Empty(rules[0].Conditions.All);
+      Assert.Single(rules[0].Conditions.All);  // Should have one condition
       Assert.NotNull(rules[0].Actions);
-      Assert.Empty(rules[0].Actions);
+      Assert.Empty(rules[0].Actions);  // Actions should be empty
     }
 
     [Fact]
@@ -288,6 +261,50 @@ rules:
       Assert.Equal(fileName, rules[1].SourceInfo.FileName);
       Assert.Equal(9, rules[1].SourceInfo.LineNumber);
       Assert.NotEmpty(rules[1].SourceInfo.OriginalText);
+    }
+
+    [Fact]
+    public void ParseRules_ShouldHandleEmptyConditions()
+    {
+      // Arrange
+      string yamlContent =
+          @"
+rules:
+  - name: 'NoConditionRule'
+    conditions:
+      all: []
+    actions:
+      - set_value:
+          key: 'temp_key'
+          value_expression: 'temperature_f * 1.8 + 32'
+";
+      var validSensors = new List<string> { "temperature_f", "temp_key" };
+
+      // Act & Assert
+      Assert.Throws<ValidationException>(() => _parser.ParseRules(yamlContent, validSensors));
+    }
+
+    [Fact]
+    public void ParseRules_ShouldRejectRuleWithNoConditions()
+    {
+      // Arrange
+      string yamlContent =
+          @"
+rules:
+  - name: 'InvalidRule'
+    conditions:
+      all: []
+      any: []
+    actions:
+      - set_value:
+          key: 'output'
+          value: 1
+";
+      var validSensors = new List<string> { "output" };
+
+      // Act & Assert
+      var ex = Assert.Throws<ValidationException>(() => _parser.ParseRules(yamlContent, validSensors));
+      Assert.Contains("must have at least one condition", ex.Message);
     }
   }
 }
