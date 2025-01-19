@@ -1,9 +1,10 @@
-﻿// File: Pulsar.Runtime/Program.cs
+// File: Pulsar.Runtime/Program.cs
 
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Text.Json;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
 using System.Threading;
 using Serilog;
 using Serilog.Events;
@@ -83,6 +84,7 @@ public class Program
     internal static RuntimeConfig LoadConfiguration(string[] args, bool requireSensors = true, string? configPath = null)
     {
         var config = new RuntimeConfig();
+        Debug.WriteLine($"Initial config - RedisConnectionString: {config.RedisConnectionString}");
 
         // First load from appsettings.json if it exists
         var configFile = configPath ?? Path.Combine(AppContext.BaseDirectory, "appsettings.json");
@@ -95,11 +97,7 @@ public class Program
                 var jsonString = File.ReadAllText(configFile);
                 Debug.WriteLine($"Read config file: {jsonString}");
 
-                var fileConfig = JsonSerializer.Deserialize<RuntimeConfig>(jsonString,
-                    new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
+                var fileConfig = JsonConvert.DeserializeObject<RuntimeConfig>(jsonString);
                 Debug.WriteLine($"Deserialized config - RedisConnectionString: {fileConfig?.RedisConnectionString}");
 
                 if (fileConfig != null)
@@ -110,62 +108,64 @@ public class Program
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Warning: Failed to load appsettings.json: {ex.Message}");
+                Debug.WriteLine($"Error loading config file: {ex}");
+                throw;
             }
         }
         else
         {
-            Debug.WriteLine("Config file not found");
+            Debug.WriteLine($"No config file found at: {configFile}");
         }
 
         // Then override with command line args
-        for (int i = 0; i < args.Length; i++)
+        for (var i = 0; i < args.Length; i++)
         {
-            var arg = args[i];
-            var nextArg = i + 1 < args.Length ? args[i + 1] : null;
-
-            switch (arg.ToLower())
+            switch (args[i])
             {
                 case "--redis":
-                    if (nextArg != null)
+                    if (i + 1 < args.Length)
                     {
-                        config.RedisConnectionString = nextArg;
-                        i++;
+                        config.RedisConnectionString = args[++i];
+                        Debug.WriteLine($"Set RedisConnectionString from args: {config.RedisConnectionString}");
                     }
                     break;
-
                 case "--cycle":
-                    if (nextArg != null && int.TryParse(nextArg, out var cycleMs))
+                    if (i + 1 < args.Length)
                     {
-                        config.CycleTime = TimeSpan.FromMilliseconds(cycleMs);
-                        i++;
+                        try
+                        {
+                            config.CycleTime = TimeSpan.Parse(args[++i]);
+                            Debug.WriteLine($"Set CycleTime from args: {config.CycleTime}");
+                        }
+                        catch (FormatException ex)
+                        {
+                            throw new FormatException($"The string was not recognized as a valid TimeSpan: {args[i]}", ex);
+                        }
                     }
                     break;
-
                 case "--log-level":
-                    if (nextArg != null && Enum.TryParse<LogEventLevel>(nextArg, true, out var level))
+                    if (i + 1 < args.Length && Enum.TryParse<LogEventLevel>(args[++i], true, out var level))
                     {
                         config.LogLevel = level;
-                        i++;
+                        Debug.WriteLine($"Set LogLevel from args: {config.LogLevel}");
                     }
                     break;
-
                 case "--capacity":
-                    if (nextArg != null && int.TryParse(nextArg, out var capacity))
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out var capacity))
                     {
                         config.BufferCapacity = capacity;
-                        i++;
+                        Debug.WriteLine($"Set BufferCapacity from args: {config.BufferCapacity}");
                     }
-                    break;
-
-                case "--help" or "-h":
-                    PrintUsage();
-                    Environment.Exit(0);
                     break;
             }
         }
 
-        ValidateConfig(config, requireSensors);
+        if (requireSensors && (config.RequiredSensors == null || config.RequiredSensors.Length == 0))
+        {
+            throw new ArgumentException("At least one sensor must be specified in the configuration.");
+        }
+
+        Debug.WriteLine($"Final config - RedisConnectionString: {config.RedisConnectionString}");
         return config;
     }
 
@@ -238,11 +238,50 @@ public class Program
 
 public class RuntimeConfig
 {
-    public string RedisConnectionString { get; set; } = "localhost:6379";
-    public TimeSpan? CycleTime { get; set; }
-    public LogEventLevel LogLevel { get; set; } = LogEventLevel.Information;
-    public int BufferCapacity { get; set; } = 100;
-    public string? LogFile { get; set; }
-    public string[] RequiredSensors { get; set; } = Array.Empty<string>();
+    private string _redisConnectionString = "localhost:6379";
+    
+    [JsonProperty("RedisConnectionString")]
+    public string RedisConnectionString
+    {
+        get => _redisConnectionString;
+        set => _redisConnectionString = string.IsNullOrEmpty(value) ? "localhost:6379" : value;
+    }
 
+    [JsonProperty("CycleTime")]
+    [JsonConverter(typeof(TimeSpanConverter))]
+    public TimeSpan? CycleTime { get; set; }
+
+    [JsonProperty("LogLevel")]
+    public LogEventLevel LogLevel { get; set; } = LogEventLevel.Information;
+
+    [JsonProperty("BufferCapacity")]
+    public int BufferCapacity { get; set; } = 100;
+
+    [JsonProperty("LogFile")]
+    public string? LogFile { get; set; }
+
+    [JsonProperty("RequiredSensors")]
+    public string[] RequiredSensors { get; set; } = Array.Empty<string>();
+}
+
+public class TimeSpanConverter : JsonConverter<TimeSpan?>
+{
+    public override TimeSpan? ReadJson(JsonReader reader, Type objectType, TimeSpan? existingValue, bool hasExistingValue, JsonSerializer serializer)
+    {
+        if (reader.TokenType == JsonToken.String)
+        {
+            var value = reader.Value as string;
+            if (string.IsNullOrEmpty(value)) return null;
+            return TimeSpan.Parse(value);
+        }
+        return null;
+    }
+
+    public override void WriteJson(JsonWriter writer, TimeSpan? value, JsonSerializer serializer)
+    {
+        if (value.HasValue)
+            writer.WriteValue(value.Value.ToString("c"));
+        else
+            writer.WriteNull();
+    }
 }

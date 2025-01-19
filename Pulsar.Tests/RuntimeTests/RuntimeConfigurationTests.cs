@@ -1,8 +1,6 @@
-// File: Pulsar.Tests/RuntimeTests/RuntimeConfigurationTests.cs
-
 using System;
 using System.IO;
-using System.Text.Json;
+using Newtonsoft.Json;
 using Serilog.Events;
 using Xunit;
 using Pulsar.Runtime;
@@ -44,7 +42,7 @@ namespace Pulsar.Tests.Runtime
             var args = new[]
             {
                 "--redis", "redis.example.com:6379",
-                "--cycle", "200",
+                "--cycle", "00:00:00.200",
                 "--log-level", "Debug",
                 "--capacity", "500"
             };
@@ -60,15 +58,14 @@ namespace Pulsar.Tests.Runtime
         [Fact]
         public void LoadConfiguration_WithConfigFile_LoadsCorrectly()
         {
-            var configJson = @"{
-        ""RedisConnectionString"": ""redis.config.com:6379"",
-        ""CycleTime"": ""00:00:00.150"",
-        ""LogLevel"": ""Warning"",
-        ""BufferCapacity"": 300,
-        ""RequiredSensors"": [""temp1"", ""temp2""]
-    }";
+            var configJson = "{\"RedisConnectionString\":\"redis.config.com:6379\",\"CycleTime\":\"00:00:00.150\",\"LogLevel\":\"Warning\",\"BufferCapacity\":300,\"RequiredSensors\":[\"temp1\",\"temp2\"]}";
 
             File.WriteAllText(_testConfigPath, configJson);
+
+            // Verify the file was written correctly
+            Assert.True(File.Exists(_testConfigPath));
+            var fileContent = File.ReadAllText(_testConfigPath);
+            Assert.Contains("redis.config.com:6379", fileContent);
 
             var config = Program.LoadConfiguration(Array.Empty<string>(), requireSensors: false, configPath: _testConfigPath);
 
@@ -76,16 +73,14 @@ namespace Pulsar.Tests.Runtime
             Assert.Equal(300, config.BufferCapacity);
             Assert.Equal(LogEventLevel.Warning, config.LogLevel);
             Assert.Equal(TimeSpan.FromMilliseconds(150), config.CycleTime);
+            Assert.Equal(new[] { "temp1", "temp2" }, config.RequiredSensors);
             Assert.Equal(2, config.RequiredSensors.Length);
         }
 
         [Fact]
         public void LoadConfiguration_CommandLineOverridesFile()
         {
-            var configJson = @"{
-        ""RedisConnectionString"": ""redis.config.com:6379"",
-        ""BufferCapacity"": 300
-    }";
+            var configJson = "{\"RedisConnectionString\":\"redis.config.com:6379\",\"BufferCapacity\":300}";
 
             File.WriteAllText(_testConfigPath, configJson);
 
@@ -111,9 +106,20 @@ namespace Pulsar.Tests.Runtime
         {
             var args = new[] { "--cycle", "invalid" };
 
-            var ex = Assert.Throws<ArgumentException>(() =>
-                Program.LoadConfiguration(args));
-            Assert.Contains("Cycle time", ex.Message);
+            var ex = Assert.Throws<FormatException>(() =>
+                Program.LoadConfiguration(args, requireSensors: false));
+            Assert.Contains("The string was not recognized as a valid TimeSpan", ex.Message);
+        }
+
+        [Fact]
+        public void VerifyJsonDeserialization()
+        {
+            var configJson = "{\"RedisConnectionString\":\"redis.config.com:6379\",\"CycleTime\":\"00:00:00.150\",\"LogLevel\":\"Warning\",\"BufferCapacity\":300,\"RequiredSensors\":[\"temp1\",\"temp2\"]}";
+
+            var config = JsonConvert.DeserializeObject<RuntimeConfig>(configJson);
+
+            Assert.NotNull(config);
+            Assert.Equal("redis.config.com:6379", config.RedisConnectionString);
         }
     }
 }
