@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Threading;
 using Serilog;
@@ -79,27 +80,42 @@ public class Program
         }
     }
 
-    private static RuntimeConfig LoadConfiguration(string[] args)
+    internal static RuntimeConfig LoadConfiguration(string[] args, bool requireSensors = true, string? configPath = null)
     {
         var config = new RuntimeConfig();
 
         // First load from appsettings.json if it exists
-        var configFile = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+        var configFile = configPath ?? Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+        Debug.WriteLine($"Looking for config file at: {configFile}");
+
         if (File.Exists(configFile))
         {
             try
             {
                 var jsonString = File.ReadAllText(configFile);
-                var fileConfig = JsonSerializer.Deserialize<RuntimeConfig>(jsonString);
+                Debug.WriteLine($"Read config file: {jsonString}");
+
+                var fileConfig = JsonSerializer.Deserialize<RuntimeConfig>(jsonString,
+                    new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+                Debug.WriteLine($"Deserialized config - RedisConnectionString: {fileConfig?.RedisConnectionString}");
+
                 if (fileConfig != null)
                 {
                     config = fileConfig;
+                    Debug.WriteLine($"Assigned config - RedisConnectionString: {config.RedisConnectionString}");
                 }
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Warning: Failed to load appsettings.json: {ex.Message}");
+                Debug.WriteLine($"Warning: Failed to load appsettings.json: {ex.Message}");
             }
+        }
+        else
+        {
+            Debug.WriteLine("Config file not found");
         }
 
         // Then override with command line args
@@ -149,11 +165,11 @@ public class Program
             }
         }
 
-        ValidateConfig(config);
+        ValidateConfig(config, requireSensors);
         return config;
     }
 
-    private static void ValidateConfig(RuntimeConfig config)
+    public static void ValidateConfig(RuntimeConfig config, bool requireSensors = true)
     {
         var errors = new List<string>();
 
@@ -162,7 +178,7 @@ public class Program
             errors.Add("Redis connection string is required (--redis or appsettings.json)");
         }
 
-        if (config.RequiredSensors == null || config.RequiredSensors.Length == 0)
+        if (requireSensors && (config.RequiredSensors == null || config.RequiredSensors.Length == 0))
         {
             errors.Add("At least one sensor must be configured");
         }
@@ -179,7 +195,6 @@ public class Program
 
         if (errors.Any())
         {
-            PrintUsage();
             throw new ArgumentException(
                 $"Invalid configuration:\n{string.Join("\n", errors)}");
         }
@@ -229,4 +244,5 @@ public class RuntimeConfig
     public int BufferCapacity { get; set; } = 100;
     public string? LogFile { get; set; }
     public string[] RequiredSensors { get; set; } = Array.Empty<string>();
+
 }
